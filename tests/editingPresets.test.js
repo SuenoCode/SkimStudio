@@ -5,9 +5,9 @@ import {BASE_DEFAULTS,validatePreset,presetMotion} from '../src/captions/presetU
 import {createPresetController} from '../src/captions/presetController.js';
 import {renderPresetCaption,presetCaptionState,captionLayout,accentColor,presetCacheSize,clearPresetLayouts} from '../src/captions/presetRenderer.js';
 import {presetFrameState} from '../src/captions/presetEffects.js';
-import {measuredWords,intervalAt} from '../src/captions/timing.js';
+import {measuredWords,intervalAt,storyCueWords,buildStoryCue} from '../src/captions/timing.js';
 import {readProject} from '../src/core/project.js';
-import {validateTimeline} from '../src/core/validation.js';
+import {validateTimeline,validateCues} from '../src/core/validation.js';
 import {shotAt,timelineIndex} from '../src/core/timelineIndex.js';
 import {applyKineticSportsUpset} from '../src/captions/kineticSportsStyle.js';
 import {applyStreamerFlashbangMeme} from '../src/captions/streamerMemeStyle.js';
@@ -137,5 +137,79 @@ test('layout cache remains bounded for thousands of captions',()=>{
  clearPresetLayouts();const ctx=context();
  for(let i=0;i<1500;i++){const c={s:0,e:1,t:'word'+i,w:[{s:0,e:1}]};presetCaptionState(ctx,c,.5,{},measuredWords(c),PRESETS[0])}
  assert.ok(presetCacheSize()<=256);clearPresetLayouts();assert.equal(presetCacheSize(),0);
+});
+// Story cues clamp words against the duration they are written with. Clamping against an
+// unrounded duration while emitting a 2-decimal cue produced "Word end must be between 0 and
+// 0.4009999999999999", which validateCues throws on and that permanently blocks preview.
+test('story cue words always validate against the rounded cue they are stored in',()=>{
+ const round=(a,b)=>{const s=+a.toFixed(2),e=+b.toFixed(2);return{s,e,dur:Math.max(0.1,e-s)}};
+ const build=(a,b,measured,text)=>{const{s,e,dur}=round(a,b);const w=storyCueWords(measured,text,dur);return{s,e,t:text,w:w||null,src:w?'measured':'accum'}};
+ for(const[a,b]of[[1.0005,1.4010],[0.995,1.395],[2.004,2.404],[0.123,0.523],[10.567,10.967],[3.005,3.405]]){
+  const cue=build(a,b,[{s:0,e:99}],'one');
+  assert.doesNotThrow(()=>validateCues([cue]),`cue ${a}-${b} must validate`);
+ }
+ // Collapsed and reversed intervals are repaired into a renderable interval inside the cue,
+ // which is what the planner has always done, and the result still has to validate.
+ for(const broken of[[{s:.5,e:.5}],[{s:.8,e:.2}]]){
+  const cue=build(0,1,broken,'one');
+  assert.equal(cue.src,'measured');
+  assert.ok(cue.w[0].e>cue.w[0].s);
+  assert.ok(cue.w[0].e<=cue.e-cue.s+1e-9);
+  assert.doesNotThrow(()=>validateCues([cue]));
+ }
+ // Unordered, miscounted and missing input cannot be repaired safely: fall back.
+ assert.equal(build(0,1,[{s:.6,e:.7},{s:.1,e:.2}],'two words').w,null);
+ assert.equal(build(0,1,[{s:0,e:1}],'two words').w,null);
+ assert.equal(build(0,1,null,'one').w,null);
+ // A valid list is preserved and stays inside the cue.
+ const ok=build(0,1,[{s:0,e:.5},{s:.5,e:1}],'two words');
+ assert.equal(ok.src,'measured');assert.deepEqual(ok.w,[{s:0,e:.5},{s:.5,e:1}]);
+ assert.doesNotThrow(()=>validateCues([ok]));
+ // Words are clamped to the cue, never past it, at both 360x640 and 1080x1920 pacing.
+ const tight=build(1.0005,1.4010,[{s:.2,e:99}],'one');
+ assert.ok(tight.w[0].e<=tight.e-tight.s+1e-9,`clamped ${tight.w[0].e} within ${(tight.e-tight.s).toFixed(3)}`);
+ assert.ok(measuredWords(ok).length===2);
+});
+// The real production cue builder must never emit a cue validateCues rejects. The previous
+// inline version clamped words to the unrounded duration but wrote a 2-decimal cue, so almost
+// every generated cue overflowed and preview failed with "Word end must be between ...".
+test('buildStoryCue never emits a cue that fails validation, unlike the previous inline logic',()=>{
+ const clampOld=dur=>value=>+Math.max(0,Math.min(dur,value)).toFixed(3);
+ const previousInline=(s,e,measured,text)=>{
+  const dur=Math.max(0.1,e-s);let w=null;
+  if(measured.length&&measured.length===text.trim().split(/\s+/).filter(Boolean).length){
+   w=measured.map(x=>({s:clampOld(dur)(x.s),e:clampOld(dur)(x.e)}));
+   for(let i=0;i<w.length-1;i++)if(!(w[i].e>w[i].s))w[i].e=Math.min(dur,w[i].s+.05);
+   const last=w.length-1;if(!(w[last].e>w[last].s))w[last].e=Math.min(dur,w[last].s+.08);
+  }
+  return{s:+s.toFixed(2),e:+e.toFixed(2),t:text,w};
+ };
+ const rejects=cue=>{if(!cue)return false;try{validateCues([cue]);return false}catch{return true}};
+ let oldFailed=0,newFailed=0,dropped=0,total=0;
+ // align() emits 3-decimal bounds and word ends that reach the cue end, which is the shape
+ // that overflowed once the cue was rounded down to 2 decimals.
+ for(let si=0;si<220;si++)for(let ei=si+4;ei<si+70;ei++)for(const n of[1,2,3]){
+  const s=+(si/1000).toFixed(3),e=+(ei/1000).toFixed(3),text=Array.from({length:n},(_,k)=>'w'+k).join(' ');
+  const measured=Array.from({length:n},(_,k)=>({s:k*(e-s)/n+.002,e:e-s}));
+  const roundS=+s.toFixed(2);
+  const relative=measured.map(x=>({s:x.s-(s-roundS),e:x.e-(s-roundS)}));
+  const built=buildStoryCue(text,s,e,relative);
+  total++;
+  if(!built)dropped++;
+  if(rejects(previousInline(s,e,measured,text)))oldFailed++;
+  if(rejects(built))newFailed++;
+ }
+ assert.ok(total>40000);
+ assert.equal(newFailed,0,'buildStoryCue must never emit an invalid cue');
+ assert.ok(oldFailed/total>.5,`control: previous inline logic failed ${(100*oldFailed/total).toFixed(1)}% of ${total} cues`);
+ // A line too short to round into a usable cue is dropped, not emitted as zero length.
+ assert.equal(buildStoryCue('a',1,1.004,[{s:0,e:.5}]),null);
+ // A word longer than the cue is clamped to it, so even a very short cue stays valid.
+ const tiny=buildStoryCue('a',1,1.01,[{s:0,e:.5}]);
+ assert.equal(tiny.w[0].e,0.01);assert.doesNotThrow(()=>validateCues([tiny]));
+ // Real narration shapes keep measured timing.
+ const real=buildStoryCue('the first moment begins',1.234,1.987,[{s:0,e:.2},{s:.2,e:.4},{s:.4,e:.6},{s:.6,e:.753}]);
+ assert.equal(real.src,'measured');assert.doesNotThrow(()=>validateCues([real]));
+ assert.equal(measuredWords(real).length,4);
 });
 

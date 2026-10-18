@@ -109,3 +109,31 @@ test('auto-edit reaches the review plan when optional speech recognition cannot 
   await page.locator('#plan_apply').click();await expect(page.locator('#ed')).not.toHaveValue('');await expect(page.locator('#plan_dialog')).toBeHidden();
   expect(errors).toEqual([]);
 });
+// End-to-end guard for the generated-caption contract. Preview and export both run validateCues
+// before doing any work, so a successful run proves every auto-edit caption validated. The
+// exhaustive proof that buildStoryCue cannot emit an invalid cue lives in editingPresets.test.js.
+test('auto-edit captions always validate, so preview and export are never blocked',async({page})=>{
+  test.setTimeout(90000);const errors=[];page.on('pageerror',error=>errors.push(error.message));await page.goto('/');await openAdvancedTools(page);await page.locator('#caption_engine').selectOption('estimated');
+  await page.locator('#file').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list')).toContainText('source.mp4');
+  // Irregular speech bursts produce cue bounds that need rounding.
+  const sr=16000,frames=sr*9,buffer=Buffer.alloc(44+frames*2);buffer.write('RIFF');buffer.writeUInt32LE(buffer.length-8,4);buffer.write('WAVEfmt ',8);buffer.writeUInt16LE(16,16);buffer.writeUInt16LE(1,20);buffer.writeUInt16LE(1,22);buffer.writeUInt32LE(sr,24);buffer.writeUInt32LE(sr*2,28);buffer.writeUInt16LE(2,32);buffer.writeUInt16LE(16,34);buffer.write('data',36);buffer.writeUInt32LE(frames*2,40);
+  for(let i=0;i<frames;i++){const t=i/sr;const on=[.13,1.07,1.61,2.44,3.02,4.11,4.57,5.73,6.19,7.44,8.11].some(s=>t>=s&&t<s+.19+.07*(i%5));
+    if(on)buffer.writeInt16LE(Math.round(Math.sin(i*2*Math.PI*190/sr)*4200+Math.sin(i*2*Math.PI*430/sr)*1500),44+i*2)}
+  await page.locator('#mp3').setInputFiles({name:'bursts.wav',mimeType:'audio/wav',buffer});await expect(page.locator('#ai')).toContainText('bursts.wav');
+  await page.locator('#sc').fill('The first moment begins right here. Then the story continues on. It finally ends now, and everyone saw it.');
+  await page.locator('#sy').click();await expect(page.locator('#plan_dialog')).toBeVisible({timeout:60000});await page.locator('#plan_apply').click();await expect(page.locator('#ed')).not.toHaveValue('');
+  // The cues the planner wrote must satisfy the very validator preview and export call.
+  const serialized=await page.locator('#ct').inputValue();
+  const cues=serialized.split('\n').filter(Boolean).map(l=>l.split('|'));
+  expect(cues.length).toBeGreaterThan(2);
+  expect(cues.filter(p=>(p[p.length-1]||'').startsWith('w:')).length).toBeGreaterThan(0);
+  // Preview runs validateCues before mixing, so a successful preview proves every generated
+  // caption validates. A rejected cue throws "Word end must be between ..." here instead.
+  await page.locator('#simple-tools-close').click();await page.locator('#play').click();
+  await expect(page.locator('#audio_meter')).toContainText('dBFS',{timeout:30000});await page.locator('#play').click();
+  await expect(page.locator('#st')).not.toContainText('must be between');
+  await openAdvancedTools(page);await page.locator('#export_resolution').selectOption('360x640');await page.locator('#simple-tools-close').click();
+  await page.locator('#exp').click();await expect(page.locator('#st')).toHaveText(/Export finished|Export failed/,{timeout:60000});
+  expect(await page.locator('#st').textContent()).not.toContain('must be between');
+  expect(errors).toEqual([]);
+});

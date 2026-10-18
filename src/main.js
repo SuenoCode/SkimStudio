@@ -7,7 +7,7 @@ import {protectedShot} from './captions/presetUtils.js';
 import {presetFrameState,renderPresetOverlay} from './captions/presetEffects.js';
 import {installPresetControls} from './captions/presetControls.js';
 import {preparePresetFont} from './captions/presetFonts.js';
-import {measuredWords,intervalAt} from './captions/timing.js';
+import {measuredWords,intervalAt,buildStoryCue} from './captions/timing.js';
 import {shotAt,timelineIndex,invalidateTimeline} from './core/timelineIndex.js';
 import {releaseMedia} from './media/lifecycle.js';
 import {mixTimelineAudio} from './export/audioMix.js';
@@ -3002,23 +3002,17 @@ function pickStoryCamera(role,shot,first){
 function assignStoryCues(c,edl,lines,S){
   const A=c.align||[];
   const cues=[];
-  lines.forEach((txt,lineIdx)=>{
-    const a=A[lineIdx];
-    const s=a?a.s:S.marks[lineIdx];
-    const e=a?a.e:S.marks[lineIdx]+S.dur[lineIdx];
-    const dur=Math.max(0.1,e-s);
-    let w=null;
-    if(a&&a.w&&a.w.length){
-      const rw=relWords(a.w,s);
-      if(rw&&rw.length===txt.split(/\s+/).filter(Boolean).length){
-        w=rw.map(x=>({s:+Math.max(0,Math.min(dur,x.s)).toFixed(3),
-                      e:+Math.max(0,Math.min(dur,x.e)).toFixed(3)}));
-        for(let i=0;i<w.length-1;i++)if(!(w[i].e>w[i].s))w[i].e=Math.min(dur,w[i].s+.05);
-        if(w.length&&!(w[w.length-1].e>w[w.length-1].s))w[w.length-1].e=Math.min(dur,w[w.length-1].s+.08);
-      }
-    }
-    cues.push({s:+s.toFixed(2),e:+e.toFixed(2),t:txt,w:w,src:w?'measured':'accum'});
-  });
+lines.forEach((txt,lineIdx)=>{
+  const a=A[lineIdx];
+  // Round the cue bounds first: the cue and its words must agree about the cue duration.
+  const s=+((a?a.s:S.marks[lineIdx])).toFixed(2);
+  const e=+((a?a.e:S.marks[lineIdx]+S.dur[lineIdx])).toFixed(2);
+  const rw=a&&a.w&&a.w.length?relWords(a.w,s):null;
+  // A narration line too short to round into a usable cue is dropped rather than emitted
+  // as a zero-length cue that validateCues would reject.
+  const cue=buildStoryCue(txt,s,e,rw);
+  if(cue)cues.push(cue);
+ });
   c.storyCues=cues;
 
   // Each shot still records which narration lines play over it (used for the
