@@ -17,8 +17,12 @@ export function installReferenceControls({$,checkpoint,getClip,changed,setStatus
     for(const id of ['caps_lock','cap','reference_motion'])$(id).checked=true;
     for(const id of ['zoom','vig','bar','grain','glow','ov_emo','ov_kw','ov_shk','ov_gl','ov_spd','ov_arrow','ov_burst','ov_stamp','ov_lower'])if($(id))$(id).checked=false;
     $('csz_val').textContent='28px';$('cy_val').textContent='54%';$('cx_val').textContent='50%';$('cfade_val').textContent='80 ms';
-    const clip=getClip();for(const shot of clip?.edl||[])if(!shot.lock&&!shot.manualFraming&&shot.camera!=='custom'){shot.camera='wide';shot.z=1.05;shot.tr={type:'cut',d:0};shot.cut=1;}
-    changed();refresh();
+    const clip=getClip();let restyled=0;
+    for(const shot of clip?.edl||[])if(!shot.lock&&!shot.manualFraming&&shot.camera!=='custom'){shot.camera='wide';shot.z=1.05;shot.tr={type:'cut',d:0};shot.cut=1;restyled++;}
+    // Only rewrite the timeline text when a shot was actually restyled. Round-tripping the
+    // editor's own text through parse/serialize would silently reformat user input even
+    // when every shot is locked, manual, or already in the Reference shape.
+    changed(restyled>0);refresh();
     document.fonts?.load('900 28px Montserrat').then(()=>changed()).catch(()=>{});
     setStatus('Reference look applied: white/accent phrase captions, smooth push-ins, clean cuts. Locked and manually framed shots were preserved.');
   };

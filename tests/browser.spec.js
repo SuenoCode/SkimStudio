@@ -91,3 +91,21 @@ test('silence guard hides stale captions and imported word timing repairs delaye
  const words={words:[{word:'Hello',start:.52,end:.9},{word:'world',start:1.42,end:1.72}]};await page.locator('#wpjson').setInputFiles({name:'word-times.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(words))});await expect(page.locator('#st')).toContainText('Imported 2 word timestamps');
  const corrected=(await page.locator('#ct').inputValue()).split('\n').map(line=>line.split('|').slice(0,2).map(Number));expect(corrected).toEqual([[.52,.9],[1.42,1.72]]);expect(errors).toEqual([]);
 });
+// Speech recognition improves caption accuracy but is optional. The default caption engine is
+// "speech", so a declined download, an unreachable model host, or a weak device must still reach
+// the review dialog instead of leaving only the progress modal behind.
+test('auto-edit reaches the review plan when optional speech recognition cannot run',async({page})=>{
+  test.setTimeout(90000);const errors=[];page.on('pageerror',error=>errors.push(error.message));await page.goto('/');await openAdvancedTools(page);
+  await expect(page.locator('#caption_engine')).toHaveValue('speech');
+  await page.locator('#file').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list')).toContainText('source.mp4');
+  await page.locator('#sc').fill('The first moment begins. Then the story continues. It ends here now.');await page.locator('#mp3').setInputFiles('tests/fixtures/narration.wav');await expect(page.locator('#ai')).toContainText('narration.wav');
+  await page.evaluate(()=>{window.studioConfirm=async()=>false});await page.locator('#sy').click();
+  await expect(page.locator('#plan_dialog')).toBeVisible({timeout:60000});await expect(page.locator('#plan_rows tr').first()).toBeVisible();
+  await expect(page.locator('#st')).toContainText('audio-estimated');await expect(page.locator('.task-progress-overlay')).toBeHidden();
+  await page.locator('#plan_cancel').click();await expect(page.locator('#plan_dialog')).toBeHidden();
+  await page.route('https://huggingface.co/**',route=>route.abort());await page.route('https://cdn-lfs.huggingface.co/**',route=>route.abort());
+  await page.evaluate(()=>{window.studioConfirm=async()=>true});await page.locator('#sy').click();
+  await expect(page.locator('#plan_dialog')).toBeVisible({timeout:60000});await expect(page.locator('#plan_rows tr').first()).toBeVisible();
+  await page.locator('#plan_apply').click();await expect(page.locator('#ed')).not.toHaveValue('');await expect(page.locator('#plan_dialog')).toBeHidden();
+  expect(errors).toEqual([]);
+});

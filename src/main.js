@@ -3392,7 +3392,11 @@ $('analyze_media').onclick=async()=>{if(busy||!clips.length)return;busy=true;exp
 function stagePlan(c,edl){assertLocksUnchanged(c.edl,edl);pendingPlan={assetId:c.id,edl:cleanData(edl),align:cleanData(c.align||null),storyCues:cleanData(c.storyCues||null)};}
 function renderPlan(){
  if(!pendingPlan){setStatus('Generate a story plan first.');return}
- const owner=clips.find(c=>c.id===pendingPlan.assetId);const rows=$('plan_rows');rows.replaceChildren();let at=0;
+ const owner=clips.find(c=>c.id===pendingPlan.assetId);
+ // The owning clip can disappear between staging and reviewing. Report it instead of
+ // throwing on a missing owner, which would leave the dialog open-but-empty with no message.
+ if(!owner){pendingPlan=null;setStatus('The clip this plan belongs to is no longer available. Generate the plan again.');return}
+ const rows=$('plan_rows');rows.replaceChildren();let at=0;
  for(const segment of pendingPlan.edl){
   const duration=(segment.e-segment.s)/segment.sp;const tr=document.createElement('tr');
   const text=document.createElement('td');const narration=(pendingPlan.storyCues||[]).filter(q=>q.s<at+duration&&q.e>at).map(q=>q.t).join(' ');text.textContent=narration||segment.t||'No narration in this interval';
@@ -3412,12 +3416,28 @@ function renderPlan(){
 }
 $('review_plan').onclick=renderPlan;$('plan_cancel').onclick=()=>$('plan_dialog').close();
 $('plan_apply').onclick=async()=>{
- if(busy||!pendingPlan)return;const owner=clips.find(c=>c.id===pendingPlan.assetId);
+ if(!pendingPlan){setStatus('Generate a story plan first.');return}
+ if(busy){setStatus('Still working on another operation. Try applying the plan again in a moment.');return}
+ const owner=clips.find(c=>c.id===pendingPlan.assetId);
+ if(!owner){pendingPlan=null;$('plan_dialog').close();setStatus('The clip this plan belongs to is no longer available. Generate the plan again.');return}
  try{validateTimeline(pendingPlan.edl,clips,owner);assertLocksUnchanged(owner.edl,pendingPlan.edl);if(owner.edl.length&&!await (window.studioConfirm?.('Replace the current timeline with this reviewed plan? You can undo this change.')??Promise.resolve(false)))return;checkpoint();owner.edl=structuredClone(pendingPlan.edl);owner.align=pendingPlan.align;owner.storyCues=pendingPlan.storyCues;pendingPlan=null;cur=clips.indexOf(owner);$('ed').value=edlToText(owner.edl);rebuildCuesAndFx(owner);$('plan_dialog').close();scheduleSave();seekToTimelineTime(0);setStatus('Applied reviewed plan. Preview and check caption timing before export.')}catch(error){setStatus('Plan needs correction: '+error.message)}
 };
 function reviewedBuilder(builder){return async()=>{
- if(busy)return;const owner=clips[cur];if(owner?.aud&&$('caption_engine')?.value==='speech'&&!hasSpeechTimings(owner)){if(!await whisperAlignWords())return;}buildBase=projectSnapshot();pendingPlan=null;exportCancelled=false;const currentAssets=new Map(clips.map(c=>[c.id,c]));
- try{await builder();const staged=pendingPlan;const status=$('st').textContent;restoreProject(buildBase);for(const c of clips){const old=currentAssets.get(c.id);if(old?._analysis){c._analysis=old._analysis;c._scenes=old._scenes}}pendingPlan=staged;if(staged){renderPlan();setStepState('idle','Plan ready. Review source choices and apply when ready.');setStatus('Story plan ready for review. Your current timeline is unchanged.')}else setStatus(status)}finally{buildBase=null}
+ if(busy)return;const owner=clips[cur];
+ // Recognized word timing improves accuracy but is never a prerequisite for an editorial
+ // plan: the plan is built from the narration audio and the script alone. A failed,
+ // unavailable, declined or cancelled sync records a note and the plan is still built,
+ // so the review dialog always appears.
+ let syncNote='';
+ if(owner?.aud&&$('caption_engine')?.value==='speech'&&!hasSpeechTimings(owner)&&!await whisperAlignWords())
+  syncNote=($('st').textContent||'Speech recognition did not run.').trim();
+ buildBase=projectSnapshot();pendingPlan=null;exportCancelled=false;const currentAssets=new Map(clips.map(c=>[c.id,c]));
+ try{await builder();const staged=pendingPlan;const status=$('st').textContent;restoreProject(buildBase);for(const c of clips){const old=currentAssets.get(c.id);if(old?._analysis){c._analysis=old._analysis;c._scenes=old._scenes}}pendingPlan=staged;
+  if(staged){renderPlan();setStepState('idle','Plan ready. Review source choices and apply when ready.');
+   setStatus('Story plan ready for review. Your current timeline is unchanged.'+(syncNote?' Captions use audio-estimated timing: '+syncNote:''));
+  }else setStatus(status)
+ }catch(error){const message=(error&&error.message)||String(error);setStepState('fail','The edit could not be built: '+message);setStatus('Auto-Edit & Sync could not finish: '+message)}
+ finally{buildBase=null}
 }}
 autoSyncAndEdit=reviewedBuilder(autoSyncAndEdit);buildStoryEdit=reviewedBuilder(buildStoryEdit);$('sy').onclick=autoSyncAndEdit;window.autoSyncAndEdit=autoSyncAndEdit;window.buildStoryEdit=buildStoryEdit;window.select=select;window.list=list;
 // Explicit timeline tools retain the source model used by the original moment editor.
@@ -3441,7 +3461,7 @@ const diskExport=document.createElement('button');diskExport.className='g sm';di
 $('project_toolbar').append(diskExport);
 diskExport.onclick=async()=>{if(busy||cur<0)return;showTaskProgress('Choose export destination','Select the folder and filename for the MP4…');try{const handle=await window.showSaveFilePicker({suggestedName:'SkimStudio.mp4',types:[{description:'MP4 video',accept:{'video/mp4':['.mp4']}}]});hideTaskProgress();await render(cur,false,handle)}catch(error){hideTaskProgress();if(error.name==='AbortError')setStatus('Direct export cancelled.');else setStatus('Direct export failed: '+error.message)}};
 const audioMeter=document.createElement('span');audioMeter.id='audio_meter';audioMeter.setAttribute('role','status');audioMeter.textContent='Mix peak: preview or export to measure';$('project_toolbar').append(audioMeter);
-document.addEventListener('click',event=>{if(busy&&!event.target.closest('#export_cancel,.alignment-cancel,.task-progress-cancel')&&!(edlPlaying&&event.target.closest('#play'))){event.preventDefault();event.stopImmediatePropagation()}},true);
+document.addEventListener('click',event=>{if(busy&&!event.target.closest('#export_cancel,.alignment-cancel,.task-progress-cancel,#plan_dialog')&&!(edlPlaying&&event.target.closest('#play'))){event.preventDefault();event.stopImmediatePropagation()}},true);
 document.addEventListener('input',()=>{if(!busy&&cur>=0&&isStoryMode()&&clips[cur].edl.length)seekToTimelineTime(lastKnownTime)});
 document.addEventListener('click',scheduleSave);
 const listWithRelink=list;list=function(){listWithRelink();[...$('list').children].forEach((row,index)=>{
@@ -3451,7 +3471,7 @@ const listWithRelink=list;list=function(){listWithRelink();[...$('list').childre
   checkpoint();releaseClip(clip);clips.splice(index,1);for(const owner of clips)validateTimeline(owner.edl,clips,owner);cur=Math.min(cur,clips.length-1);if(cur>=0)select(cur);else restoreProject({clips:[],script:$('sc').value,settings:{}});list();scheduleSave();
  };row.append(button);
 })};window.list=list;
-refreshReferenceCues=installReferenceControls({$,checkpoint,getClip:()=>clips[cur],setStatus,changed:()=>{if(cur>=0){$('ed').value=edlToText(clips[cur].edl);renderTimeline();if(clips[cur].edl.length)seekToTimelineTime(lastKnownTime)}scheduleSave()}});
+refreshReferenceCues=installReferenceControls({$,checkpoint,getClip:()=>clips[cur],setStatus,changed:timelineChanged=>{if(cur>=0){if(timelineChanged)$('ed').value=edlToText(clips[cur].edl);renderTimeline();if(clips[cur].edl.length)seekToTimelineTime(lastKnownTime)}scheduleSave()}});
 const applyPresetChanged=()=>{
   if(cur>=0&&isStoryMode()&&clips[cur].edl.length)seekToTimelineTime(lastKnownTime);
   scheduleSave();
