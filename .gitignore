@@ -6,7 +6,7 @@ test-results/
 .cache/
 coverage/
 *.log
-analysis/
+/analysis/
 .env
 .env.*
 !.env.example
