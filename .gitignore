@@ -1,0 +1,12 @@
+node_modules/
+.git/
+dist/
+test-results/
+.vite/
+.cache/
+coverage/
+*.log
+analysis/
+.env
+.env.*
+!.env.example

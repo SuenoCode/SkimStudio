@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SkimStudio - Pro Commentary &amp; Caption NLE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Bangers&family=Bebas+Neue&family=Luckiest+Guy&family=Montserrat:wght@800;900&family=Permanent+Marker&family=Poppins:wght@800;900&family=Rubik+Mono+One&family=Titan+One&display=swap" rel="stylesheet">
+
+</head>
+<body>
+
+<!-- Top Navigation Bar -->
+<div class="top-nav">
+  <div class="brand">
+    <h1>Skim<span>Studio</span> <span style="font-size:13px;color:var(--mu);font-weight:500">Studio</span></h1>
+    <span class="badge">NLE Pro</span>
+  </div>
+
+  <div class="top-meta">
+    <div id="dur_match_banner" class="badge badge-suc" style="display:none">
+      <span id="dur_match_text">Voice: 0.0s • Video: 0.0s (100% Locked)</span>
+    </div>
+    <span id="ai" class="val-badge" style="width:auto">No voice loaded</span>
+    <select id="tm" style="font-weight:700">
+      <option value="story" selected>Commentary (VoiceStudio Audio + Dynamic Edits)</option>
+      <option value="story_multi">Commentary (Multiple Clips / Story Edit)</option>
+      <option value="cap">Standard Auto-Captions (Trimmed clips)</option>
+    </select>
+  </div>
+
+  <div style="display:flex;gap:6px;align-items:center">
+    <button id="exp" style="padding:6px 16px;font-size:13px">Export 9:16 Video</button>
+    <button id="all" class="g sm">Export All</button>
+  </div>
+</div>
+
+<!-- Main Studio Workspace (3 Columns) -->
+<div class="top-nav" id="project_toolbar" aria-label="Project controls">
+  <div class="pills">
+    <button class="g sm" id="project_save">Save project</button>
+    <button class="g sm" id="project_load">Load saved</button>
+    <button class="g sm" id="project_export">Export project JSON</button>
+    <label class="pill-btn">Import project JSON<input type="file" id="project_import" accept=".json" hidden></label>
+    <button class="g sm" id="project_undo">Undo</button><button class="g sm" id="project_redo">Redo</button>
+    <button class="warn sm" id="project_reset">Reset project</button>
+    <button class="g sm" id="capabilities">Browser capabilities</button>
+    <button class="g sm" id="analyze_media">Analyze media</button>
+    <button class="g sm" id="review_plan">Review plan</button>
+  </div>
+  <div class="pills">
+    <label for="export_resolution">Export</label><select id="export_resolution"><option value="360x640">360 × 640</option><option value="720x1280" selected>720 × 1280</option><option value="1080x1920">1080 × 1920</option></select>
+    <label for="export_quality">Quality</label><select id="export_quality"><option value="3000000">Standard</option><option value="8000000" selected>High</option></select>
+    <label><input type="checkbox" id="allow_pitch"> Allow source pitch changes at altered speed</label><label for="end_tail">End tail (s)</label><input id="end_tail" type="number" min="0" max="3" step="0.1" value="0.5" style="width:55px">
+  </div>
+</div>
+<dialog id="plan_dialog" style="background:var(--card);color:var(--tx);border:1px solid var(--ac);max-width:95vw;width:1000px;max-height:85vh">
+  <h2>Review story plan</h2><p id="plan_note"></p>
+  <p>Selection uses image statistics and your clip notes. It does not recognize people, actions, or outcomes. Review every source choice.</p>
+  <div style="overflow:auto;max-height:55vh"><table style="width:100%;text-align:left"><thead><tr><th>Narration / role</th><th>Source / in–out</th><th>Timeline</th><th>Evidence</th></tr></thead><tbody id="plan_rows"></tbody></table></div>
+  <div class="row"><button id="plan_apply">Apply reviewed plan</button><button class="g" id="plan_cancel">Close review</button></div>
+</dialog>
+
+<div class="workspace">
+
+  <!-- Left Column: Media Bin, VoiceStudio MP3, Script & Retiming -->
+  <div class="panel">
+    <div class="panel-head">
+      <span>Media &amp; Commentary Bin</span>
+    </div>
+    <div class="panel-body">
+      <!-- Media Drop -->
+      <div class="sec">
+        <div class="sec-title"><span>Video Clips</span></div>
+        <div class="drop" id="drop">Drop video clips here or click to choose<input id="file" type="file" accept="video/*" multiple hidden></div>
+        <div id="list"></div>
+      </div>
+
+      <!-- Commentary Workflow -->
+      <div id="edbox">
+        <!-- Step 1: Script (Manual Only — user types or pastes their own narration) -->
+        <div class="sec">
+          <div class="sec-title">
+            <span><span class="step-num">1</span> Narration Script</span>
+            <div class="pills">
+              <button id="cp" class="pill-btn">Copy for VoiceStudio</button>
+              <button id="fmt_lines" class="pill-btn" title="Smart splice narration into concise, viral short lines">✂ Splice Short (Masterpiece)</button>
+            </div>
+          </div>
+          <textarea id="sc" spellcheck="false" style="height:80px" placeholder="Type or paste your narration lines here...&#10;&#10;Click 'Splice Short' to automatically split long sentences into punchy viral lines (2-4 words) perfectly synchronized to VoiceStudio!"></textarea>
+        </div>
+
+        <!-- Step 2: VoiceStudio MP3 -->
+        <div class="sec">
+          <div class="sec-title"><span><span class="step-num">2</span> VoiceStudio Audio</span></div>
+          <div class="row">
+            <label class="g" style="cursor:pointer;border:1px solid var(--ac);border-radius:6px;padding:6px 10px;color:var(--ac);font-weight:700">
+              Import VoiceStudio MP3<input id="mp3" type="file" accept="audio/*" hidden>
+            </label>
+          </div>
+          <div class="row"><label for="caption_engine">Caption timing</label><select id="caption_engine"><option value="speech">Recognize spoken words</option><option value="estimated">Audio estimate (approximate)</option><option value="manual">Manual / imported timing</option></select></div>
+          <div class="row"><label for="caption_text_source">Caption text</label><select id="caption_text_source"><option value="script">Match my script</option><option value="transcript">Use recognized speech</option></select></div>
+          <div class="row"><button id="sync_speech" class="g sm">Sync captions to speech</button></div>
+          <p class="reference-note">Speech sync runs locally after a one-time model download. Caption timing is never stretched into narration pauses.</p>
+          <div class="row">
+            <label>Original Audio Ducking</label>
+            <input type="range" id="og" min="0" max="100" value="15" style="width:70px">
+            <span id="og_val" class="val-badge">15%</span>
+          </div>
+        </div>
+
+        <!-- Step 3: Retiming & Bring Commentary to Life -->
+        <div class="sec" style="background:rgba(34,195,208,.05);border-color:var(--ac)">
+          <div class="sec-title">
+            <span><span class="step-num">3</span> Auto-Retime &amp; Edit</span>
+            <button id="sy" class="sm">Auto-Edit &amp; Sync</button>
+          </div>
+          <div class="row">
+            <label>Pacing Style</label>
+            <select id="variety_engine" style="flex:1">
+              <option value="cinematic" selected>Pro Narrative (Steady shots, intentional cuts)</option>
+              <option value="multicam">Dynamic Multi-Cam (Alternating wide &amp; medium)</option>
+              <option value="slowmo">Cinematic Slowmo &amp; Climax</option>
+              <option value="speedramp">High-Energy Speed Ramp</option>
+            </select>
+          </div>
+          <div class="row">
+            <label><input type="checkbox" id="multi_clip" checked> Cut across all clips if multiple loaded</label>
+          </div>
+          <div class="row">
+            <label style="min-width:55px">State</label>
+            <span class="val-badge" id="st3_state" style="width:auto">Not built yet</span>
+          </div>
+          <div class="row">
+            <label style="min-width:55px">Result</label>
+            <span id="st3_msg" style="font-size:11px;color:var(--mu);flex:1">Press “Auto-Edit &amp; Sync” to build the edit.</span>
+          </div>
+        </div>
+        <div class="sec" id="stbox" style="display:none">
+          <div class="sec-title"><span>Story Edit Engine</span><span style="color:var(--mu);font-size:10px">Narration is the master timeline</span></div>
+          <div class="row">
+            <label>Source clips</label>
+            <select id="st_src" style="flex:1">
+              <option value="used">Only clips ticked in the bin</option>
+              <option value="all">All imported clips</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Pacing</label>
+            <select id="st_pace" style="flex:1">
+              <option value="relaxed">Relaxed / documentary (4.5-8s shots)</option>
+              <option value="balanced" selected>Balanced (3-5s shots)</option>
+              <option value="fast">Brisk (1.8-3s shots)</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Transitions</label>
+            <select id="st_tr" style="flex:1">
+              <option value="cut">Hard cuts only</option>
+              <option value="cine" selected>Seamless crossfade on every cut</option>
+              <option value="manual">Manual (respect locked shots)</option>
+            </select>
+          </div>
+          <div class="row">
+            <label><input type="checkbox" id="st_leak"> Light leaks</label>
+            <label><input type="checkbox" id="st_burn"> Film burns</label>
+            <label class="pill-btn" style="cursor:pointer">Storyboard<input id="st_json" type="file" accept=".json,application/json" hidden></label>
+          </div>
+          <div class="row">
+            <label>Shot variety</label>
+            <input type="range" id="st_vary" min="0" max="4" step="1" value="1" style="flex:1">
+            <span class="val-badge" id="st_vary_val">1</span>
+          </div>
+          <div class="row">
+            <label>Notes for selected clip</label>
+            <input class="in" id="st_tags" placeholder="e.g. stadium, crowd, trophy, night">
+          </div>
+          <div class="row">
+            <button id="st_go" class="g sm" onclick="buildStoryEdit()">Generate Story Plan</button>
+            <button class="pill-btn" onclick="resetShotLocks()">Reset locks</button>
+          </div>
+          <div class="row">
+            <span class="val-badge" id="st_info" style="width:auto">no story edit yet</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Center Stage: Dedicated Preview Canvas, Scrubber & Transport -->
+  <div class="stage">
+    <div class="canvas-wrap">
+      <canvas id="pc" width="360" height="640"></canvas>
+      <div class="canvas-hint" id="chint" style="display:none">Click video to focus / highlight subject</div>
+    </div>
+
+    <!-- Dedicated Transport Bar with Dedicated Preview and Edit Buttons -->
+    <div class="transport-bar">
+      <button id="btn_start" class="pill-btn" title="Jump to Start">⏮ 0s</button>
+      <button id="btn_prev_cut" class="pill-btn" title="Previous Cut">⏪ Cut</button>
+      <button id="play" class="g" style="padding:6px 16px;font-weight:800;font-size:13px">▶ Play / Pause</button>
+      <button id="btn_next_cut" class="pill-btn" title="Next Cut">Cut ⏩</button>
+      
+      <!-- User Requested Dedicated Preview & Edit Buttons -->
+      <button id="btn_preview_moment" class="pill-btn warn" style="font-weight:700" title="Preview Only This Moment">👁 Preview Moment</button>
+      <button id="btn_edit_moment" class="pill-btn sel" style="font-weight:700" title="Customize Every Effect for this Moment">✏ Edit Moment</button>
+
+      <div id="timecode_display" class="val-badge" style="font-family:ui-monospace,monospace;font-size:11px;padding:3px 8px">00:00.0 / 00:00.0</div>
+    </div>
+    <div id="st" style="font-size:11px;color:var(--mu);margin-top:6px">Ready. Import clip and VoiceStudio MP3.</div>
+  </div>
+
+  <!-- Right Column: Inspector & Customizer Tabs (Captions, FX, SFX, Raw EDL) -->
+  <div class="panel right">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="tab_captions">Captions</button>
+      <button class="tab-btn" data-tab="tab_effects">Visual FX</button>
+      <button class="tab-btn" data-tab="tab_sfx">SFX</button>
+      <button class="tab-btn" data-tab="tab_raw">Raw Tables</button>
+    </div>
+
+    <!-- Tab 1: Caption Customization -->
+    <div id="tab_captions" class="panel-body">      <div class="sec reference-style-panel">
+        <div class="sec-title">Reference story style</div>
+        <p class="reference-note">White setup + vivid emphasis. Compact phrases, quick entrances and gentle reframing.</p>
+        <button id="apply_reference" class="g sm">Apply reference look</button>
+        <div class="row"><label for="reference_accent">Accent</label><select id="reference_accent"><option value="auto">By wording (editable)</option><option value="green">Lime green</option><option value="magenta">Magenta</option><option value="red">Red</option></select></div>
+        <div class="row"><label for="reference_reveal">Reveal</label><select id="reference_reveal"><option value="line">Phrase lines</option><option value="word">Word by word</option></select><label for="reference_words">Words</label><select id="reference_words"><option value="4">4</option><option value="6">6</option><option value="8" selected>8</option><option value="10">10</option></select></div>
+        <div class="row"><label for="reference_intro">Entrance</label><input id="reference_intro" type="range" min="0" max="120" step="10" value="80"><label><input id="reference_motion" type="checkbox" checked> Smooth push-in</label></div>
+        <details><summary>Adjust a caption's emphasis</summary>
+          <label for="reference_cue">Caption</label><select id="reference_cue" style="width:100%"></select>
+          <div class="row"><label for="reference_emphasis">Emphasis words</label><input id="reference_emphasis" type="text" placeholder="e.g. THE OTHER TEAM" style="width:100%"></div>
+          <div class="row"><label for="reference_cue_accent">Color</label><select id="reference_cue_accent"><option value="auto">Default</option><option value="green">Green</option><option value="magenta">Magenta</option><option value="red">Red</option></select><button id="reference_apply_emphasis" class="g sm">Apply to caption</button></div>
+        </details>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title"><span>Typography &amp; Layout</span><label><input type="checkbox" id="cap" checked> Show</label></div>
+        <div class="row">
+          <label style="min-width:55px">Font</label>
+          <select id="cf" style="flex:1">
+            <option value="Anton,Impact,sans-serif">Anton (Shorts Viral)</option>
+            <option value="'Bebas Neue',Impact,sans-serif">Bebas Neue (Clean Tall)</option>
+            <option value="Montserrat,'Arial Black',sans-serif" selected>Montserrat Black</option>
+            <option value="Poppins,'Arial Black',sans-serif">Poppins ExtraBold</option>
+            <option value="Bangers,Impact,sans-serif">Bangers (Hype Comic)</option>
+            <option value="'Luckiest Guy',Impact,sans-serif">Luckiest Guy (Viral Meme)</option>
+            <option value="'Titan One',sans-serif">Titan One (Chunky)</option>
+            <option value="'Rubik Mono One',sans-serif">Rubik Mono One (Bold Tech)</option>
+            <option value="'Permanent Marker',cursive">Permanent Marker</option>
+            <option value="Impact,Haettenschweiler,sans-serif">Impact</option>
+            <option value="'Arial Black',sans-serif">Arial Black</option>
+          </select>
+          <label><input type="checkbox" id="caps_lock" checked> ALL CAPS</label>
+        </div>
+
+        <div class="row">
+          <label style="min-width:55px">Upload</label>
+          <label class="pill-btn" style="cursor:pointer">Custom Font (.ttf/.otf)<input id="custom_font" type="file" accept=".ttf,.otf,.woff,.woff2" hidden></label>
+        </div>
+
+        <div class="row">
+          <label style="min-width:55px">Size</label>
+          <input type="range" id="csz" min="18" max="110" value="28" style="flex:1">
+          <span id="csz_val" class="val-badge">28px</span>
+        </div>
+
+        <div class="row">
+          <label style="min-width:55px">Word sync</label>
+          <input type="range" id="wo" min="-400" max="400" value="0" style="flex:1" title="Shift word highlight & audio timing earlier or later (ms)">
+          <span class="val-badge" id="wo_val">0 ms</span>
+        </div>
+        <div class="row">
+          <label style="min-width:55px">Caption fade</label>
+          <input type="range" id="cfade" min="0" max="40" step="1" value="8" style="flex:1" title="Fade each caption in and out (0 = hard on/off). Fades out on the last spoken word, so nothing is shown during silence.">
+          <span class="val-badge" id="cfade_val">80 ms</span>
+        </div>
+        <div class="row">
+          <label style="min-width:55px">Words/Screen</label>
+          <select id="chunk_size" style="flex:1" title="Maximum words displayed simultaneously on screen">
+            <option value="2">2 words (Ultra Fast Viral)</option>
+            <option value="3">3 words (Masterpiece Short)</option>
+            <option value="4">4 words (Balanced Shorts)</option>
+            <option value="5">5 words (Standard)</option>
+            <option value="8" selected>8 words (Story phrase)</option><option value="all">Full Sentence</option>
+          </select>
+        </div>
+        <div class="row">
+          <label style="min-width:55px">Position Y</label>
+          <input type="range" id="cy" min="10" max="92" value="54" style="flex:1">
+          <span id="cy_val" class="val-badge">54%</span>
+          <div class="pills">
+            <button class="pill-btn" onclick="$('cy').value=16;$('cy').dispatchEvent(new Event('input'))">Top</button>
+            <button class="pill-btn" onclick="$('cy').value=50;$('cy').dispatchEvent(new Event('input'))">Mid</button>
+            <button class="pill-btn" onclick="$('cy').value=68;$('cy').dispatchEvent(new Event('input'))">Viral (68%)</button>
+            <button class="pill-btn" onclick="$('cy').value=86;$('cy').dispatchEvent(new Event('input'))">Bottom</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label style="min-width:55px">Position X</label>
+          <input type="range" id="cx_pos" min="10" max="90" value="50" style="flex:1">
+          <span id="cx_val" class="val-badge">50%</span>
+          <div class="pills">
+            <button class="pill-btn" onclick="$('cx_pos').value=25;$('cx_pos').dispatchEvent(new Event('input'))">Left</button>
+            <button class="pill-btn" onclick="$('cx_pos').value=50;$('cx_pos').dispatchEvent(new Event('input'))">Center</button>
+            <button class="pill-btn" onclick="$('cx_pos').value=75;$('cx_pos').dispatchEvent(new Event('input'))">Right</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label style="min-width:55px">Style</label>
+          <select id="cs" style="flex:1">
+            <option value="reference" selected>Reference Story (white + vivid emphasis)</option><option value="shorts">Shorts Viral (active word pop &amp; bounce)</option>
+            <option value="pop">Highlight Word (full sentence)</option>
+            <option value="pill">Pill Box (dark rounded background)</option>
+            <option value="bold">Bold Outline (heavy drop-shadow)</option>
+            <option value="progressive">Progressive reveal</option><option value="karaoke">Karaoke Glow</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Text</label><input type="color" id="tc" value="#ffffff" title="Text Color">
+          <label>Highlight</label><input type="color" id="acc" value="#ffe14a" title="Active Word Color">
+          <label>Stroke</label><input type="color" id="sc_col" value="#000000" title="Outline Color">
+          <label>Outline</label>
+          <select id="sw">
+            <option value="none">None</option>
+            <option value="thin" selected>Thin</option>
+            <option value="normal">Medium</option>
+            <option value="thick">Thick</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: Visual Effects & Reframe -->
+    <div id="tab_effects" class="panel-body" style="display:none"><div class="sec"><div class="sec-title">Color adjustment</div>
+<div class="row"><label for="exposure">Exposure (stops)</label><input id="exposure" type="range" min="-2" max="2" step="0.1" value="0"></div>
+<div class="row"><label for="contrast">Contrast</label><input id="contrast" type="range" min="0.5" max="1.5" step="0.01" value="1.08"></div>
+<div class="row"><label for="saturation">Saturation</label><input id="saturation" type="range" min="0" max="2" step="0.01" value="1.12"></div>
+</div>
+      <div class="sec">
+        <div class="sec-title"><span>Reframe &amp; Layout</span></div>
+        <div class="row">
+          <label>Layout</label>
+          <select id="mode"><option value="fill">Fill 9:16 (smart crop)</option><option value="fit">Fit + blurred bg</option></select>
+          <label><input type="checkbox" id="face" checked> Face tracker</label><span id="fd" class="note"></span>
+        </div>
+        <div class="row">
+          <label>Reframe X</label>
+          <input type="range" id="pos" min="0" max="100" value="50" style="flex:1"><span id="pos_val" class="val-badge">50%</span>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title"><span>Cinematic Visual Effects</span></div>
+        <div class="row">
+          <label>Color Grade</label>
+          <select id="grade">
+            <option value="none" selected>None</option>
+            <option value="cine">Cinematic</option>
+            <option value="warm">Warm golden</option>
+            <option value="vivid">Vivid pop</option>
+            <option value="moody">Moody teal/orange</option>
+            <option value="bw">Noir B&amp;W</option>
+          </select>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="zoom"> Subtle Punch-in</label>
+          <label><input type="checkbox" id="vig"> Vignette</label>
+          <label><input type="checkbox" id="grain"> Film grain</label>
+          <label><input type="checkbox" id="glow"> Glow</label>
+          <label><input type="checkbox" id="bar"> Progress bar</label>
+          <label><input type="checkbox" id="ov_emo"> Emoji reactions</label>
+          <label><input type="checkbox" id="ov_kw"> Keyword pop-ups</label>
+          <label><input type="checkbox" id="ov_shk"> Hit shake</label>
+          <label><input type="checkbox" id="ov_gl"> Glitch on cuts</label>
+          <label><input type="checkbox" id="ov_spd"> Speed lines</label>
+          <label><input type="checkbox" id="ov_arrow"> Contextual arrow callouts</label>
+          <label><input type="checkbox" id="ov_burst"> Comic impact burst</label>
+          <label><input type="checkbox" id="ov_stamp"> Reaction stamp</label>
+          <label><input type="checkbox" id="ov_lower"> Lower-third label</label>
+        </div>
+        <div class="row">
+          <input class="in" id="hook" placeholder="Hook title banner (first 2.8s)">
+        </div>
+        <div class="row">
+          <input class="in" id="mark" placeholder="Watermark / @handle">
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Sound Effects -->
+    <div id="tab_sfx" class="panel-body" style="display:none">
+      <div class="sec">
+        <div class="sec-title"><span>Sound Effects (SFX)</span><label><input type="checkbox" id="sfx" checked> On</label></div>
+        <div class="row">
+          <label>Intensity</label>
+          <select id="fxi"><option value="light" selected>Subtle / Minimal (Pro)</option><option value="normal">Balanced</option><option value="heavy">Heavy</option></select>
+          <label>Volume</label>
+          <input type="range" id="sv" min="5" max="100" value="30" style="width:65px">
+          <span id="sv_val" class="val-badge">30%</span>
+        </div>
+        <div class="row">
+          <button id="an" class="g sm">Auto-Detect SFX</button>
+          <button id="tfx" class="g sm">Test Sounds</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Raw Tables -->
+    <div id="tab_raw" class="panel-body" style="display:none">
+      <div class="sec">
+        <div class="sec-title"><span>Raw EDL (Decision List)</span></div>
+        <textarea id="ed" spellcheck="false" style="height:90px"></textarea>
+      </div>
+      <div class="sec">
+        <div class="sec-title"><span>Captions (s|e|t|w)</span><label class="pill-btn" style="cursor:pointer">Load SRT<input id="srt" type="file" accept=".srt,.vtt,.txt" hidden></label></div>
+        <textarea id="ct" spellcheck="false" style="height:80px"></textarea>
+      </div>
+      <div class="sec">
+        <div class="sec-title"><span>Word-Level Sync</span><span style="color:var(--mu);font-size:10px">A word highlights only after it is spoken</span></div>
+        <div class="row">
+          <label style="min-width:82px">Timing source</label>
+          <span class="val-badge" id="wp_src">no captions yet</span>
+        </div>
+        <div class="row">
+          <button class="pill-btn" onclick="retimeWords()">Re-time words from audio</button>
+          <button class="pill-btn" onclick="whisperAlignWords()">Whisper word alignment</button>
+          <label class="pill-btn" style="cursor:pointer">Import word timings<input id="wpjson" type="file" accept=".json,application/json" hidden></label>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-title"><span>Sound Effects (t|k)</span></div>
+        <textarea id="ft" spellcheck="false" style="height:60px"></textarea>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- BOTTOM PANEL: PROFESSIONAL VIDEO TIMELINE NLE (REBUILT ARCHITECTURE) -->
+<div class="timeline-panel">
+  <div class="timeline-toolbar">
+    <div style="display:flex;align-items:center;gap:8px">
+      <b style="color:var(--ac);text-transform:uppercase;letter-spacing:.05em">Timeline</b>
+      <span id="tl_info" class="badge" style="font-weight:600">0 Segments</span>
+      <button class="pill-btn warn" onclick="previewSelectedMoment()">👁 Preview Moment</button>
+      <button class="pill-btn sel" onclick="openSelectedMomentEditor()">✏ Edit Moment Effects</button>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px">
+      <label>Zoom</label>
+      <input type="range" id="tl_zoom" min="0.4" max="2.5" step="0.1" value="1.0" style="width:80px">
+      <span id="tl_zoom_val" class="val-badge">1.0x</span>
+    </div>
+  </div>
+
+  <!-- 2-column timeline: fixed headers | scrollable lanes -->
+  <div class="tl-body">
+    <!-- Fixed Track Headers -->
+    <div class="tl-headers">
+      <div class="tl-header-cell ruler" style="font-size:9px">Timecode</div>
+      <div class="tl-header-cell">V1 Video</div>
+      <div class="tl-header-cell">A1 Voice</div>
+      <div class="tl-header-cell">T1 Captions</div>
+      <div class="tl-header-cell">FX Highlights</div>
+    </div>
+
+    <!-- Scrollable Lanes Area -->
+    <div class="tl-lanes-scroll" id="tl_scroll">
+      <div class="tl-lanes-inner" id="tl_inner">
+        <!-- Playhead Needle (inside scrollable area, no offset needed) -->
+        <div id="playhead" style="left:0px">
+          <div id="playhead-head"></div>
+        </div>
+
+        <!-- Ruler Lane -->
+        <div class="tl-lane-row ruler" id="tl_ruler_lane"></div>
+
+        <!-- Video Cuts Lane -->
+        <div class="tl-lane-row" id="tl_video_lane"></div>
+
+        <!-- Audio Waveform Lane -->
+        <div class="tl-lane-row" id="tl_audio_lane">
+          <canvas id="tl_waveform_canvas" style="position:absolute;top:0;left:0;height:100%;pointer-events:none"></canvas>
+        </div>
+
+        <!-- Captions Lane -->
+        <div class="tl-lane-row" id="tl_cap_lane"></div>
+
+        <!-- SFX Lane -->
+        <div class="tl-lane-row" id="tl_fx_lane"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: DEDICATED MOMENT EFFECT CUSTOMIZER -->
+<div class="modal-overlay" id="moment_modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3 id="modal_title">✏ Customize Moment #1</h3>
+      <button class="pill-btn" onclick="closeMomentEditor()">✕ Close</button>
+    </div>
+
+    <!-- Caption Line Text -->
+    <div class="sec">
+      <div class="sec-title"><span>Narration Caption Line</span></div>
+      <input type="text" id="m_text" style="width:100%;font-weight:700;font-size:13px">
+      <div class="row" style="margin-top:6px">
+        <label>Time In</label><input type="text" id="m_s" style="width:65px">
+        <label>Time Out</label><input type="text" id="m_e" style="width:65px">
+        <div class="pills">
+          <button class="pill-btn" onclick="nudgeModalTiming(-0.1)">-0.1s</button>
+          <button class="pill-btn" onclick="nudgeModalTiming(+0.1)">+0.1s</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Camera Framing & Angle -->
+    <div class="sec">
+      <div class="sec-title"><span>Camera Angle &amp; Shot Framing</span></div>
+      <div class="row">
+        <select id="m_camera" style="flex:1">
+          <option value="wide">Wide Angle (1.05x - Establishing overview)</option>
+          <option value="medium">Medium Shot (1.22x)</option>
+          <option value="close_face">Face Close-Up (1.95x - Tight focus on subject)</option>
+          <option value="drift">Ken Burns Drift (1.18x to 1.55x - Smooth dynamic zoom)</option>
+          <option value="close_left">Action Focus Left (1.85x - Rule of thirds left)</option>
+          <option value="close_right">Action Focus Right (1.85x - Rule of thirds right)</option>
+          <option value="pan">Tracking Pan (Horizontal cinematic sweep)</option>
+          <option value="custom">Custom Manual Framing</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label style="min-width:65px">Zoom Punch</label>
+        <input type="range" id="m_zoom" min="1.0" max="2.4" step="0.05" value="1.0" style="flex:1">
+        <span id="m_zoom_val" class="val-badge">1.0x</span>
+      </div>
+
+      <div class="row">
+        <label style="min-width:65px">Focus X</label>
+        <input type="range" id="m_fx" min="0" max="100" value="50" style="flex:1">
+        <span id="m_fx_val" class="val-badge">50%</span>
+      </div>
+
+      <div class="row">
+        <label style="min-width:65px">Focus Y</label>
+        <input type="range" id="m_fy" min="0" max="100" value="45" style="flex:1">
+        <span id="m_fy_val" class="val-badge">45%</span>
+        <button class="pill-btn sel" onclick="pickFocusFromCanvas()">Click Video To Pinpoint</button>
+      </div>
+    </div>
+
+    <!-- Playback Retiming (Slowmo / Speedup) -->
+    <div class="sec">
+      <div class="sec-title"><span>Playback Speed &amp; Retiming</span></div>
+      <div class="pills">
+        <button class="pill-btn" onclick="setModalSpeed(0.5)">0.5x (Slowmo)</button>
+        <button class="pill-btn" onclick="setModalSpeed(0.75)">0.75x (Subtle Slow)</button>
+        <button class="pill-btn" onclick="setModalSpeed(1.0)">1.0x (Normal)</button>
+        <button class="pill-btn" onclick="setModalSpeed(1.25)">1.25x</button>
+        <button class="pill-btn" onclick="setModalSpeed(1.5)">1.5x (Speed Ramp)</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label>Exact Speed</label><input type="text" id="m_sp" style="width:60px">
+        <label><input type="checkbox" id="m_rev"> Rewind Replay (1.2s reverse)</label>
+      </div>
+    </div>
+
+    <!-- Transition at cut (Story Edit mode only) -->
+    <div class="sec" id="m_trbox" style="display:none">
+      <div class="sec-title"><span>Transition at Cut</span><span style="color:var(--mu);font-size:10px">Outgoing + incoming frames blend together</span></div>
+      <div class="row">
+        <select id="m_tr" style="flex:1">
+          <option value="cut">Hard cut (default)</option>
+          <option value="dissolve">Short dissolve</option>
+          <option value="leak">Light leak</option>
+          <option value="burn">Film burn</option>
+        </select>
+        <button class="pill-btn" id="m_lock">Lock shot</button>
+      </div>
+      <div class="row">
+        <label>Seconds</label>
+        <input type="text" id="m_trd" style="width:60px">
+        <span style="color:var(--mu);font-size:10px">6-12 frames is typical (0.2-0.4s)</span>
+      </div>
+    </div>
+
+    <!-- Subject Highlighting Effect -->
+    <div class="sec">
+      <div class="sec-title"><span>Subject Highlight &amp; Floating Badge</span><span style="color:var(--mu);font-size:10px">Use only when it adds meaning</span></div>
+      <div class="row">
+        <label>Visual Effect</label>
+        <select id="m_hl">
+          <option value="">None (Clean shot)</option>
+          <option value="ring">Pulsing Neon Ring (manual, only for clear targets)</option>
+          <option value="spot">Dramatic Spotlight (Dim background)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Badge Label</label>
+        <input type="text" id="m_lb" placeholder="e.g. WATCH THIS, THE CHAMPION, THE MOMENT" style="flex:1">
+      </div>
+    </div>
+
+    <!-- Sound Effect (SFX) -->
+    <div class="sec">
+      <div class="sec-title"><span>Sound Effect (SFX)</span></div>
+      <div class="row">
+        <select id="m_sfx">
+          <option value="">None</option>
+          <option value="whoosh">Whoosh (Speed ramp / transition cut)</option>
+          <option value="hit">Hit / Boom (Zoom punch-in / impact)</option>
+          <option value="ding">Ding (Subject callout / reveal)</option>
+          <option value="pop">Pop (Subtle humor / pop)</option>
+          <option value="scratch">Scratch (Rewind / double take)</option>
+          <option value="riser">Riser (Climax tension build)</option>
+        </select>
+        <button class="pill-btn" onclick="testModalSfx()">Test SFX</button>
+      </div>
+    </div>
+
+    <!-- Footer Controls -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
+      <button class="g" onclick="previewModalMoment()">👁 Live Test This Moment</button>
+      <button onclick="saveModalMoment()">Save &amp; Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export Progress Overlay -->
+<div class="sdlg" id="share_dlg" role="dialog" aria-label="Export finished"><div class="sbox"><video id="share_v" controls playsinline></video><div>
+<h2>Your video is ready</h2><p>MP4 with H.264 video and AAC audio. It works on every major platform.</p>
+<a id="share_dl" class="b p" download="commentary_9x16.mp4">Download MP4</a><button class="b" id="share_btn">Share…</button>
+<div style="margin-top:8px"><a class="b" target="_blank" rel="noopener" href="https://www.youtube.com/upload">YouTube</a><a class="b" target="_blank" rel="noopener" href="https://www.tiktok.com/upload">TikTok</a><a class="b" target="_blank" rel="noopener" href="https://www.instagram.com/">Instagram</a><a class="b" target="_blank" rel="noopener" href="https://www.facebook.com/reels/create">Facebook Reels</a><a class="b" target="_blank" rel="noopener" href="https://x.com/compose/post">X</a></div>
+<p>Download first, then pick the file on the platform's upload page. Platforms only accept uploads from their own sites or approved apps.</p>
+<button class="b" onclick="closeShareDialog()">Close</button></div></div></div>
+<div class="export-overlay" id="export_overlay">
+  <div class="export-text" id="export_text">Exporting...</div>
+  <div class="progress-bar"><div class="progress-fill" id="export_progress" style="width:0%"></div></div>
+  <div class="export-note" id="export_note"></div>
+  <button class="warn" id="export_cancel" onclick="cancelExport()">Cancel Export</button>
+</div>
+
+
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
