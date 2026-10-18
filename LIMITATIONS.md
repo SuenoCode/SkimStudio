@@ -2,6 +2,8 @@
 
 This release repairs and extends the supplied editor. It does **not** satisfy every aspirational capability in the engineering specification.
 
+The three new editing presets and their specific fallback behavior are documented in [PRESET_STYLES.md](PRESET_STYLES.md). In particular: no semantic shot selection, automatic face avoidance, immediate interruption of browser audio decode/render, unlimited media size, guaranteed VFR frame identity, or universal font/codec availability is claimed. New presets hide captions without complete word timing. Oversized audio mixes fail with a resource-budget message; shorten sources or reduce clips.
+
 ## Editing intelligence and captions
 
 - Footage analysis uses sampled luminance histograms, pixel changes, edge detail, and exposure estimates. It does not recognize subjects, goals, wins, chronology, or narrative meaning. Filename/manual-note keyword matches are metadata evidence only. Unmatched selections are explicitly marked for manual review.

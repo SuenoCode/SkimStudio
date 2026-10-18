@@ -1,6 +1,16 @@
 import {scoreShot} from './analysis/shotRanking.js';
 import {renderReferenceCaption,splitReferencePhrases,referenceMotion} from './captions/referenceStyle.js';
 import {installReferenceControls} from './captions/referenceControls.js';
+import {getPreset,migratePresetData} from './captions/presetRegistry.js';
+import {renderPresetCaption,clearPresetLayouts} from './captions/presetRenderer.js';
+import {protectedShot} from './captions/presetUtils.js';
+import {presetFrameState,renderPresetOverlay} from './captions/presetEffects.js';
+import {installPresetControls} from './captions/presetControls.js';
+import {preparePresetFont} from './captions/presetFonts.js';
+import {measuredWords,intervalAt} from './captions/timing.js';
+import {shotAt,timelineIndex,invalidateTimeline} from './core/timelineIndex.js';
+import {releaseMedia} from './media/lifecycle.js';
+import {mixTimelineAudio} from './export/audioMix.js';
 import {analyzeNarration,captionIsActive,anchorRecognizedOnsets,captionEndTime} from './captions/activity.js';
 import {alignedCues,alignmentForLines} from './captions/alignedCues.js';
 import '@fontsource/montserrat/latin-900.css';
@@ -25,6 +35,7 @@ let activeSegIdx=0, edlPlaying=false, edlStopFn=null;
 let tlPixelsPerSec=40, isScrubbing=false;
 let exportCancelled=false;
 let refreshReferenceCues=()=>{};
+let presetUI=null;
 
 const pv=document.createElement('video');pv.playsInline=true;pv.loop=true;pv.muted=true;
 const pc=$('pc'),px=pc.getContext('2d');
@@ -109,6 +120,7 @@ async function add(fs){
   try{
   for(const f of fs){
     if(f.type.startsWith('video/')){
+      if(clips.length>=100){setStatus('Media bin limit is 100 clips.');break}
       updateTaskProgress((completed/files.length)*100,`Loading ${f.name} and reading its metadata…`,'Importing video');
       const vEl=document.createElement('video');
       vEl.playsInline=true;vEl.muted=true;vEl.preload='auto';
@@ -152,6 +164,7 @@ function showCues(){
   $('ft').value=c.fx.map(f=>f.t.toFixed(2)+'|'+f.k).join('\n');
   reportWordTimingSource(c);
   refreshReferenceCues();
+  presetUI?.refreshCues();
 }
 
 // Caption/SFX textareas re-parse on every keystroke but only redraw the timeline after a pause
@@ -180,6 +193,7 @@ $('ct').oninput=()=>{
   c.cuesEdited=true;
   c.wordAlignment=null;c.captionTimingStale=false;
   clearWordCache(c);
+  presetUI?.refreshCues();
   debouncedRenderTimeline();
 };
 
@@ -245,6 +259,7 @@ $('custom_font').onchange=async e=>{
     opt.textContent=f.name+' (Custom)';
     opt.selected=true;
     $('cf').prepend(opt);
+    presetUI?.controller.markManual('cf');clearPresetLayouts();
     setStatus('Custom font loaded: '+f.name);
   }catch(err){
     setStatus('Could not load font: '+err.message);
@@ -366,6 +381,7 @@ function rr(ctx,x,y,w,h,r){
 }
 
 function zf(t,o){
+  if(getPreset(o.cs))return 1;
   if(o.referenceStyle)return 1;
   if(!o.zoom)return 1;
   let z=1+.05*(.5-.5*Math.cos(t*.8));
@@ -436,6 +452,7 @@ function estWordSpans(c,ws){
 
 // Normalized, monotonic word spans for one cue (relative seconds, cached)
 function cueWords(c){
+  if(c.w!=null)return measuredWords(c);
   const ws=(c.t||'').split(/\s+/).filter(Boolean);
   if(!ws.length)return [];
   const sig=JSON.stringify(c.w)+'|'+c.t+'|'+ws.length+'|'+(c.w?c.w.length:0)+'|'+(c.e-c.s).toFixed(3);
@@ -544,7 +561,7 @@ function parseWords(s){
 // Masterpiece Smart Splicer: Automatically splits sentences into concise, viral short lines (2-4 words)
 function splitLines(t,maxWords){
   if(maxWords==null&&$('cs')?.value==='reference')return splitReferencePhrases(t,8);
-  maxWords=maxWords||4;
+  maxWords=maxWords||getPreset($('cs')?.value)?.maxWords||4;
   if(!t)return [];
   const rawParagraphs=t.split('\n').map(s=>s.trim()).filter(Boolean);
   const sentences=[];
@@ -609,6 +626,8 @@ function splitLines(t,maxWords){
 
 // CAPTION RENDERING ENGINE
 function caps(ctx,c,t,o){
+  const config=getPreset(o.cs);
+  if(config)return renderPresetCaption(ctx,c,t,{...o,wordOffset:wordOffsetSec()},measuredWords(c),config);
   if(!captionIsActive(c,t,cueWords(c),{...o,wordOffset:wordOffsetSec()}))return;
   if(o.cs==='reference')return renderReferenceCaption(ctx,c,t,{...o,wordOffset:wordOffsetSec()},cueWords(c));
   if(t<c.s||t>=c.e)return;
@@ -1019,6 +1038,10 @@ function ov(ctx,o,cues){
 }
 function draw(ctx,v,cues,o){
   const sw=v.videoWidth,sh=v.videoHeight;if(!sw)return;
+  const time=o.vt??v.currentTime??0,config=getPreset(o.cs);
+  const shot=o.shot||(o.timeline?.length?segAt({edl:o.timeline},time)?.g:null);
+  const state=presetFrameState(config,o,cues,cueWords,time,o.el??time,shot);
+  o={...o,vt:time};
   if(!o.noClear)ctx.clearRect(0,0,o.w,o.h);
   // Layered rendering lets a transition composite two shots while captions and
   // overlays are still painted once, on top, fully legible.
@@ -1027,9 +1050,13 @@ function draw(ctx,v,cues,o){
   const outer=(o.alpha!=null&&o.alpha<1);
   if(outer)ctx.save();
   if(outer)ctx.globalAlpha=o.alpha;
-  const gf=[GR[o.grade],`brightness(${Math.pow(2,o.exposure||0)}) contrast(${o.contrast??1}) saturate(${o.saturation??1})`].filter(Boolean).join(' ');ctx.filter=gf;
+  const reactionBw=state.bw;
+  const gf=[GR[o.grade],reactionBw?'grayscale(1) contrast(1.25)':null,`brightness(${Math.pow(2,o.exposure||0)}) contrast(${o.contrast??1}) saturate(${o.saturation??1})`].filter(Boolean).join(' ');ctx.filter=gf;
   let SHK=0;if($('ov_shk').checked&&o.fx&&o.vt!=null){for(const f of o.fx)if(f.k==='hit'){const d=o.vt-f.t;if(d>=0&&d<.3)SHK=Math.max(SHK,(1-d/.3)*9*o.w/360)}}
-  if(SHK){ctx.save();ctx.translate(o.w/2+(Math.random()-.5)*SHK,o.h/2+(Math.random()-.5)*SHK);ctx.scale(1.04,1.04);ctx.translate(-o.w/2,-o.h/2)}
+  if(config)SHK=0;
+  const presetTransform=config&&frame&&(state.zoom!==1||state.shakeX||state.shakeY);
+  if(presetTransform){ctx.save();ctx.translate(o.w/2+state.shakeX*o.w/360,o.h/2+state.shakeY*o.w/360);ctx.scale(state.zoom,state.zoom);ctx.translate(-o.w/2,-o.h/2)}
+  if(SHK){ctx.save();ctx.translate(o.w/2+Math.sin(time*173)*SHK/2,o.h/2+Math.sin(time*227)*SHK/2);ctx.scale(1.04,1.04);ctx.translate(-o.w/2,-o.h/2)}
 
   if(frame){
   if(o.mode==='fit'){
@@ -1057,23 +1084,18 @@ function draw(ctx,v,cues,o){
   fx2(ctx,v,o);
   }
   if(SHK)ctx.restore();
+  if(presetTransform)ctx.restore();
   if(outer)ctx.restore();
   if(!over)return;
+  ctx.filter='none';
 
-  ov(ctx,o,cues);
+  if(config)renderPresetOverlay(ctx,state,o.w,o.h);else ov(ctx,o,cues);
 
   if(o.cap){
     const t=o.vt!=null?o.vt:v.currentTime;
     // Pick the LAST cue that has started. A plain find() would return an older cue at
     // an exact boundary, which reads as the caption lagging behind the voice.
-    let c=null;
-    if(cues&&cues.length){
-      for(let i=0;i<cues.length;i++){
-        const q=cues[i];
-        if(t>=q.s&&t<=q.e){c=q;break}
-        if(q.s<=t)c=q;
-      }
-    }
+    const index=intervalAt(cues,t),c=index>=0?cues[index]:null;
     if(c&&t<=c.e)caps(ctx,c,t,o);
   }
 }
@@ -1146,9 +1168,18 @@ function opts(w,h,c){
     zoom:$('zoom').checked,
     vig:$('vig').checked,
     grain:$('grain').checked,
-    glow:$('glow').checked,
+    glow:getPreset($('cs').value)?false:$('glow').checked,
     bar:$('bar').checked,
     cs:$('cs').value,
+    timeline:isStoryMode()?c.edl:null,
+    presetMotion:$('preset_motion')?.checked??true,
+    presetGlitch:$('preset_glitch')?.checked??false,
+    presetShake:$('preset_shake')?.checked??false,
+    presetBacking:$('preset_backing')?.checked??false,
+    presetBw:$('preset_bw')?.checked??false,
+    presetGlow:$('preset_glow')?.checked??true,
+    presetAccent:$('preset_accent')?.value||'auto',
+    captionIntro:Number($('cfade').value)/100,
     referenceStyle:$('cs').value==='reference',
     speechRuns:c.aud?.speechRuns??c.aud?.runs??null,
     referenceAccent:$('reference_accent')?.value||'auto',
@@ -1202,7 +1233,7 @@ function nz(ac){
   if(!b){
     b=ac.createBuffer(1,Math.floor(ac.sampleRate*0.6),ac.sampleRate);
     const d=b.getChannelData(0);
-    for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*0.6;
+    let seed=123456789;for(let i=0;i<d.length;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;d[i]=(seed/4294967296*2-1)*.6}
     _nzCache.set(ac,b);
   }
   return b;
@@ -1250,6 +1281,7 @@ $('tfx').onclick=()=>{
   const ac=new AudioContext(),m=ac.createGain();
   m.gain.value=$('sv').value/100;m.connect(ac.destination);
   ['whoosh','hit','ding','pop','scratch','riser'].forEach((k,i)=>sfx(ac,m,k,ac.currentTime+i*1.1));
+  setTimeout(()=>ac.close().catch(()=>{}),7500);
 };
 
 const KW={scratch:/\b(what|wait|huh|hold on|rewind|oops)\b/,ding:/\b(wow|amazing|yes|win|won|finally|look|watch)\b/,hit:/\b(boom|bang|crash|stop|no|insane|crazy)\b/,whoosh:/\b(go|run|fast|quick|jump|then|suddenly)\b/,pop:/\b(haha|lol|funny|gotcha)\b/};
@@ -1261,8 +1293,7 @@ $('an').onclick=async()=>{
   try{
     setStatus('Analyzing audio energy…');
     const ac=new AudioContext();
-    const buf=await ac.decodeAudioData(await c.file.arrayBuffer());
-    ac.close();
+    let buf;try{buf=await ac.decodeAudioData(await c.file.arrayBuffer())}finally{await ac.close()}
     const d=buf.getChannelData(0),w=Math.floor(buf.sampleRate*.05),r=[];
     const totalWindows=Math.max(1,Math.floor((d.length-w)/w));
     let windowIndex=0;
@@ -1651,6 +1682,7 @@ function updateDurBanner(c){
 }
 
 function rebuildCuesAndFx(c){
+  invalidateTimeline(c.edl);
   let t=0;if(!c.cuesEdited)c.cues=[];if(!c.fxEdited)c.fx=[];
   const totalEdl=c.edl.length;
   const fxiVal=$('fxi')?$('fxi').value:'light';
@@ -1931,7 +1963,7 @@ function seekToTimelineTime(t){
  if(cur<0||busy||clips[cur].missing)return;queuedPreviewTime=Math.max(0,t);if(previewSeeking)return;
  previewSeeking=true;
  (async()=>{try{while(queuedPreviewTime!==null){const time=queuedPreviewTime;queuedPreviewTime=null;const c=clips[cur];updatePlayheadPosition(time);
- if(isStoryMode()&&c.edl.length){validateTimeline(c.edl,clips,c);activeSegIdx=segAt(c,time).i;await storyFrame(px,c,time,storyDuration(c).end,false,360,640)}
+ if(isStoryMode()&&c.edl.length){activeSegIdx=segAt(c,time).i;await storyFrame(px,c,time,storyDuration(c).end,false,360,640)}
  else{await seekV(pv,time);await track(pv);draw(px,pv,c.cues,opts(360,640,c))}
  }}catch(error){setStatus('Preview seek failed: '+error.message)}finally{previewSeeking=false}})();
 }
@@ -2147,6 +2179,7 @@ function pickFocusFromCanvas(){
 function testModalSfx(){
   const k=$('m_sfx').value;if(!k)return;
   const ac=new AudioContext(),m=ac.createGain();m.gain.value=$('sv').value/100;m.connect(ac.destination);
+  setTimeout(()=>ac.close().catch(()=>{}),1500);
   sfx(ac,m,k,ac.currentTime+0.05);
 }
 
@@ -2202,9 +2235,10 @@ async function pre(v,c){
 async function previewCommentary(rangeStart=0,rangeEnd=null){
  if(cur<0||busy)return;const c=clips[cur];if(!c.edl?.length)return;
  let ac,source,cancelled=false;busy=true;edlPlaying=true;exportCancelled=false;syncPlayLabel();pv.pause();
- edlStopFn=()=>{cancelled=true;try{source?.stop()}catch{};};
+ edlStopFn=()=>{cancelled=true;exportCancelled=true;try{source?.stop()}catch{};};
  try{
   if($('cs').value==='reference')await document.fonts.load('900 28px Montserrat');
+  if(getPreset($('cs').value))await preparePresetFont($('cf').value);
   validateTimeline(c.edl,clips,c);validateCues(c.cues);const total=storyDuration(c).end;
   setStatus('Preparing preview audio…');showTaskProgress('Preparing preview','Mixing the preview audio…',null,()=>edlStopFn?.());ac=new AudioContext();await ac.resume();const mixed=await mixAudio(c,total,true);if(cancelled)return;hideTaskProgress();
   const end=rangeEnd===null?total:Math.min(total,rangeEnd);source=ac.createBufferSource();source.buffer=mixed;source.connect(ac.destination);const start=ac.currentTime+.05;source.start(start,rangeStart,end-rangeStart);
@@ -2497,8 +2531,9 @@ async function sampleFootage(clip,onProgress){
   const wasMuted=v.muted;
   v.pause();
   try{v.muted=true}catch(e){}
-  for(let k=0;k<N;k++){
-    const t=(k/(N-1))*(dur-0.04);
+  try{for(let k=0;k<N;k++){
+    if(exportCancelled)throw new Error('cancelled');
+    const t=(k/(N-1))*Math.max(0,dur-0.001);
     await seekV(v,t);
     let d;
     try{cx.drawImage(v,0,0,FA_W,FA_H);d=cx.getImageData(0,0,FA_W,FA_H).data}catch(e){continue}
@@ -2520,8 +2555,8 @@ async function sampleFootage(clip,onProgress){
     if(k%12===0&&onProgress)onProgress(Math.round((k+1)/N*100));
     if(k%6===0)await new Promise(r=>setTimeout(r,0));   // keep the UI alive
   }
-  try{v.muted=wasMuted}catch(e){}
-return{fps:(N-1)/(dur-.04),samples};
+  }finally{v.muted=wasMuted}
+return{fps:(N-1)/Math.max(.001,dur-.001),samples};
 }
 
 // ---- public entry point, cached on the clip ----
@@ -2530,7 +2565,7 @@ async function analyzeFootage(clip,onProgress){
   await ensureClipLoaded(clip);
   const s=await sampleFootage(clip,onProgress);
   if(!s){clip._analysis={ok:false,shots:[],events:[],dead:[],profile:null};return clip._analysis}
-  const res=await analyzeInWorker(s.samples,FA_W,FA_H,s.fps);
+  const res=await analyzeInWorker(s.samples,FA_W,FA_H,s.fps,()=>exportCancelled);
   res.semantic=false;   // structural analysis only - no object recognition
   clip._analysis=res;
   return res;
@@ -2580,12 +2615,12 @@ const END_ALLOWANCE=0.5;
 function storyDuration(c){
   const audioEnd=(c.aud&&c.aud.dur)||0;
   let captionEnd=0;
-  (c.cues||[]).forEach(q=>{
+  for(let i=(c.cues?.length||0)-1;i>=0;i--){const q=c.cues[i];
     const cw=cueWords(q);
     const done=captionEndTime(q,cw,wordOffsetSec());
-    if(done>captionEnd)captionEnd=done;
-  });
-  const foot=(c.edl&&c.edl.length)?c.edl.reduce((a,g)=>a+(g.e-g.s)/g.sp,0):0;
+    if(done>captionEnd){captionEnd=done;break}
+  }
+  const foot=c.edl?.length?timelineIndex(c.edl).duration:0;
   const end=Math.max(audioEnd,captionEnd,foot)+END_ALLOWANCE;
   return{
     end:+end.toFixed(3),
@@ -3025,7 +3060,7 @@ function cancelExport(){
 
 const seekV=(v,t)=>seekFrame(v,t,()=>exportCancelled&&busy);
 const decF=async f=>new OfflineAudioContext(2,1,48000).decodeAudioData(await f.arrayBuffer());
-function segAt(c,vt){let a=0;for(let j=0;j<c.edl.length;j++){const g=c.edl[j],d=(g.e-g.s)/g.sp;if(vt<a+d||j===c.edl.length-1)return{g,a,d,i:j};a+=d}}
+function segAt(c,vt){return shotAt(c.edl,vt)}
 
 // Framing for one segment, shared by every renderer so preview and export stay identical.
 // A segment with cut === 0 continues the previous shot: it keeps the previous framing and its
@@ -3061,10 +3096,11 @@ function segFraming(list,i,el,dur,vSrc,sw){
     fz=seg.z>1?1+(seg.z-1)*(1-Math.pow(1-k,3)):1;
   }
   const framing={fz,fx:curFx,fy:curFy};
-  return $('cs').value==='reference'&&$('reference_motion')?.checked&&!seg.lock&&!seg.manualFraming&&(cam==='wide'||cam==='drift')?referenceMotion(framing,mt,sd):framing;
+  const referenceFraming=$('cs').value==='reference'&&$('reference_motion')?.checked&&!seg.lock&&!seg.manualFraming&&(cam==='wide'||cam==='drift')?referenceMotion(framing,mt,sd):framing;
+  return referenceFraming;
 }
 // A cut flash marks a real cut only. Caption changes inside a shot must not flash.
-function segCutFlash(seg,el){return($('cs').value==='reference'||seg.cut===0)?0:(el<0.08?(1-el/0.08)*0.25:0)}
+function segCutFlash(seg,el){return(getPreset($('cs').value)||$('cs').value==='reference'||seg.cut===0)?0:(el<0.08?(1-el/0.08)*0.25:0)}
 
 // ============================================================================
 // STORY RENDERER - one function for BOTH preview and export.
@@ -3096,7 +3132,9 @@ async function storyFrame(ctx,c,vt,total,live,w,h){
   const vs=clip.videoEl||pv,sw=vs.videoWidth||1;
 
   // A transition belongs to the shot it opens, and never extends past it
-  const tr=(g.tr&&g.tr.d>0&&gi>0&&el<g.tr.d)
+  const config=getPreset($('cs').value);
+  const hardCut=config?.motion.hardCuts&&!protectedShot(g)&&!protectedShot(c.edl[gi-1]);
+  const tr=(!hardCut&&g.tr&&g.tr.d>0&&gi>0&&el<g.tr.d)
     ?(()=>{const progress=Math.max(0,Math.min(1,el/g.tr.d));return{type:g.tr.type||'dissolve',d:g.tr.d,k:progress,blend:easeInOutCubic(progress)}})():null;
 
   if(tr){
@@ -3106,7 +3144,7 @@ async function storyFrame(ctx,c,vt,total,live,w,h){
     const pvs=pclip.videoEl||pv,psw=pvs.videoWidth||1;
 
       const FR=segFraming(c.edl,gi,el,d,vs,sw);
-    if(live){
+    if(live&&!config){
       // Preview follows the audio clock. Seeking every RAF was the source of the
       // visible hitching; media playback now supplies the frames while we only
       // correct drift when it becomes perceptible.
@@ -3183,7 +3221,7 @@ async function storyFrame(ctx,c,vt,total,live,w,h){
   let src=vs;
   if(live)syncLiveVideo(vs,transitionSourceTime(g,el),g.sp,`shot-${gi}`);
   if(g.rev){
-    if(g._f&&g._f.length)src=g._f[Math.min(g._f.length-1,Math.floor((1-Math.min(1,el/d))*g._f.length))];
+    if(!config&&g._f&&g._f.length)src=g._f[Math.min(g._f.length-1,Math.floor((1-Math.min(1,el/d))*g._f.length))];
     else {vs.pause();if(!live)await seekV(vs,Math.max(g.s,g.e-el*g.sp-1/30))}
   }else if(!live){
     await seekV(vs,g.s+Math.max(0,Math.min(el*g.sp,g.e-g.s)));
@@ -3206,18 +3244,10 @@ function closeShareDialog(){
   const dl=$('share_dl');if(dl)dl.removeAttribute('href');
   releaseExportURL();
 }
-async function mixAudio(c,total,story){
-const oc=new OfflineAudioContext(2,Math.max(1,Math.ceil(total*48000)),48000),m=oc.createGain(),cp=oc.createDynamicsCompressor();m.connect(cp);cp.connect(oc.destination);
-const og=story&&c.aud?$('og').value/100:1;
-const sourceBus=oc.createGain();sourceBus.connect(m);sourceBus.gain.value=1;
-if(story&&c.aud){for(const [s,e] of c.aud.runs||[]){sourceBus.gain.setTargetAtTime(.25,Math.max(0,s-.03),.01);sourceBus.gain.setTargetAtTime(1,e,.06)}}
-const place=async(clip,s,e,sp,rev,at)=>{if(sp!==1&&!$('allow_pitch').checked)return;for(const other of clips)if(other!==clip)delete other._ab;if(clip._ab===undefined)clip._ab=await decF(clip.file).catch(()=>null);const b=clip._ab;if(!b){clip.audioWarning='Source audio unavailable: '+clip.file.name;return}clip.audioWarning='';let bf,off=0;
-{const n=Math.max(1,Math.floor((e-s)*b.sampleRate)),i0=Math.floor(s*b.sampleRate);bf=oc.createBuffer(2,n,b.sampleRate);for(let ch=0;ch<2;ch++){const sd=b.getChannelData(Math.min(ch,b.numberOfChannels-1)),dd=bf.getChannelData(ch);for(let i=0;i<n;i++)dd[i]=sd[rev?i0+n-1-i:i0+i]||0}}
-const src=oc.createBufferSource(),g=oc.createGain();src.buffer=bf;src.playbackRate.value=sp;g.gain.value=og;const duration=(e-s)/sp;const fade=Math.min(.008,duration/4);g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(og,at+fade);g.gain.setValueAtTime(og,at+duration-fade);g.gain.linearRampToValueAtTime(0,at+duration);src.connect(g);g.connect(sourceBus);src.start(at,off,e-s)};
-if(story){let at=0;for(const g of c.edl){await place((g.clipIdx!=null&&clips[g.clipIdx])||c,g.s,g.e,g.sp,g.rev,at);at+=(g.e-g.s)/g.sp}if(c.aud){const s=oc.createBufferSource();s.buffer=c.aud.buf;s.connect(m);s.start(0)}}
-else await place(c,0,c.videoEl.duration,1,false,0);
-if($('sfx').checked){const sg=oc.createGain();sg.gain.value=$('sv').value/100;sg.connect(m);(c.fx||[]).forEach(f=>sfx(oc,sg,f.k,f.t))}
-const rendered=await oc.startRendering();let peak=0;for(let channel=0;channel<rendered.numberOfChannels;channel++){const data=rendered.getChannelData(channel);for(let i=0;i<data.length;i++)peak=Math.max(peak,Math.abs(data[i]))}if($('audio_meter'))$('audio_meter').textContent='Mix peak: '+(peak>0?(20*Math.log10(peak)).toFixed(1)+' dBFS':'silent')+(peak>=1?' — clipping detected':'');return rendered}
+async function mixAudio(c,total,story,cancelled=()=>exportCancelled){
+ return mixTimelineAudio({clips,owner:c,total,story,sourceGain:story&&c.aud?Number($('og').value)/100:1,allowPitch:$('allow_pitch').checked,sounds:$('sfx').checked,soundGain:Number($('sv').value)/100,playSound:sfx,decode:decF,cancelled,
+ onPeak:peak=>{if($('audio_meter'))$('audio_meter').textContent='Mix peak: '+(peak>0?(20*Math.log10(peak)).toFixed(1)+' dBFS':'silent')+(peak>=1?' — clipping detected':'')}});
+}
 async function composeAt(c,ctx,vt,total,story){
 const v=c.videoEl;
 if(story){await storyFrame(ctx,c,vt,total,false,W,H)}
@@ -3227,6 +3257,7 @@ const c=clips[i];if(busy&&!batch)return;let ae,ve,fileStream;busy=true;exportCan
 const story=isStoryMode()&&c.edl&&c.edl.length;
 try{
 if($('cs').value==='reference')await document.fonts.load('900 28px Montserrat');
+if(getPreset($('cs').value))await preparePresetFont($('cf').value);
 if(story&&!c.aud){
   showExportOverlay('Import the VoiceStudio MP3 first','Story mode exports need a VoiceStudio MP3 for the voice track. Add it in Step 2, then export again.');
   await new Promise(r=>setTimeout(r,1500));
@@ -3291,17 +3322,20 @@ let pendingPlan = null, buildBase = null, saveTimer = null, lastSaved = '';
 const cleanData = value => JSON.parse(JSON.stringify(value, (key,item) => key.startsWith('_') ? undefined : item));
 function projectSnapshot() {
   return {
-    version:1, script:$('sc').value, selectedId:clips[cur]?.id,
+    version:1, script:$('sc').value, selectedId:clips[cur]?.id, captionPreset:$('cs').value,presetState:presetUI?.controller.snapshot(),
     settings:Object.fromEntries([...document.querySelectorAll('input[id],select[id]')].filter(el=>el.type!=='file'&&!el.id.startsWith('m_')).map(el=>[el.id,el.type==='checkbox'?el.checked:el.value])),
     clips:clips.map(c=>({id:c.id,name:c.file.name,size:c.file.size,type:c.file.type,metadata:c.metadata||{duration:c.videoEl?.duration},tags:c.tags||'',use:c.use!==false,cues:cleanData(c.cues),fx:cleanData(c.fx),edl:cleanData(c.edl),align:cleanData(c.align||null),wordAlignment:cleanData(c.wordAlignment||null),captionTimingStale:!!c.captionTimingStale,storyCues:cleanData(c.storyCues||null),cuesEdited:!!c.cuesEdited,fxEdited:!!c.fxEdited,narration:c.aud?{name:c.aud.name,dur:c.aud.dur}:c.narration||null}))
   };
 }
 function restoreProject(data) {
+  data=migratePresetData(data);
+  presetUI?.controller.restore(data.presetState);
   if(edlStopFn){edlStopFn();edlStopFn=null}pv.pause();pendingPlan=null;
   const previous = new Map(clips.map(c=>[c.id,c]));
   clips=data.clips.map(saved=>{
     const existing=previous.get(saved.id);
-    const matches=existing&&!existing.missing;
+    const matches=existing&&!existing.missing&&existing.file?.name===saved.name&&existing.file?.size===saved.size;
+    if(existing&&!matches)releaseClip(existing);
     return {...(matches?existing:{}),...structuredClone(saved),file:matches?existing.file:{name:saved.name,size:saved.size,type:saved.type},videoEl:matches?existing.videoEl:null,url:matches?existing.url:null,aud:existing?.aud?.name===saved.narration?.name?existing.aud:null,missing:!matches,status:matches?'Ready':'Relink video required',_analysis:matches?existing._analysis:null};
   });
   for(const [id,c] of previous)if(!clips.some(k=>k.id===id))releaseClip(c);
@@ -3309,13 +3343,14 @@ function restoreProject(data) {
     const el=$(id);if(!el||el.type==='file'||el.id.startsWith('m_'))continue;
     if(el.type==='checkbox')el.checked=!!value;else el.value=String(value);
   }
+  presetUI?.refresh();
   $('sc').value=data.script;cur=clips.findIndex(c=>c.id===data.selectedId);if(cur<0&&clips.length)cur=0;
   $('tm').dispatchEvent(new Event('change'));activeSegIdx=0;
   if(cur>=0){$('ed').value=edlToText(clips[cur].edl);showCues();renderTimeline();updateDurBanner(clips[cur]);if(clips[cur].url)pv.src=clips[cur].url;else pv.removeAttribute('src')}
   else{$('ed').value='';$('ct').value='';$('ft').value='';pv.removeAttribute('src');px.clearRect(0,0,pc.width,pc.height)}
   list();syncPlayLabel();
 }
-function releaseClip(c){c.videoEl?.pause();c.videoEl?.removeAttribute('src');c.videoEl?.load();if(c.url)URL.revokeObjectURL(c.url);delete c._ab;}
+function releaseClip(c){releaseMedia(c)}
 function checkpoint(){if(!busy)projectHistory.push(projectSnapshot())}
 function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{if(busy)return scheduleSave();try{const snapshot=projectSnapshot();const key=JSON.stringify(snapshot);if(key!==lastSaved){await storeProject(snapshot);lastSaved=key}}catch(error){setStatus('Autosave unavailable: '+error.message+'. Export project JSON to keep your edits.')}},1000)}
 document.addEventListener('input',scheduleSave);
@@ -3327,10 +3362,10 @@ $('project_undo').onclick=()=>{if(busy)return;const state=projectHistory.undo(pr
 $('project_redo').onclick=()=>{if(busy)return;const state=projectHistory.redo(projectSnapshot());if(state){restoreProject(state);scheduleSave();setStatus('Redid the edit.')}};
 $('project_save').onclick=async()=>{try{if(busy)return;showTaskProgress('Saving project','Writing project settings to this browser…',20);await storeProject(projectSnapshot());updateTaskProgress(100,'Project saved.','Saving project');setStatus('Project saved in this browser. Media bytes are not stored; keep your original files for relinking.')}catch(error){setStatus('Save failed: '+error.message)}finally{hideTaskProgress()}};
 async function importProjectData(data){
-  const {readProject}=await import('./core/project.js');readProject(data);
+  const {readProject}=await import('./core/project.js');data=readProject(data);
   if(busy)return;if(clips.length&&!await (window.studioConfirm?.('Replace the current project with this saved project?')??Promise.resolve(false)))return;
   newHistoryReset(projectHistory);restoreProject(data);scheduleSave();
-  setStatus('Project loaded. Relink missing videos in the media bin and import each narration file again.');
+  setStatus('Project loaded. Relink missing videos and reimport narration if needed.'+(data.presetWarning?' '+data.presetWarning:''));
 }
 function newHistoryReset(history){history.past=[];history.future=[];return history}
 $('project_load').onclick=async()=>{try{showTaskProgress('Loading project','Reading the saved project from this browser…',20);const data=await loadProject();if(!data){setStatus('No saved project in this browser.');return}updateTaskProgress(70,'Restoring clips, captions, and settings…','Loading project');await importProjectData(data)}catch(error){setStatus('Load failed: '+error.message)}finally{hideTaskProgress()}};
@@ -3345,7 +3380,7 @@ list=function(){originalList();[...$('list').children].forEach((row,index)=>{
   const label=document.createElement('label');label.className='pill-btn';label.textContent='Relink video';
   const input=document.createElement('input');input.type='file';input.accept='video/*';input.hidden=true;label.append(input);label.onclick=e=>e.stopPropagation();
   input.onchange=async()=>{if(busy)return;const file=input.files[0];if(!file)return;busy=true;const video=document.createElement('video');video.muted=true;video.playsInline=true;video.src=URL.createObjectURL(file);
-    try{await waitMedia(video);if(file.size!==clip.size||file.name!==clip.name||Math.abs(video.duration-clip.metadata.duration)>.1)throw new Error('Choose the original video with matching name, size, and duration.');Object.assign(clip,{file,url:video.src,videoEl:video,missing:false,status:'Relinked'});list();setStatus('Relinked '+file.name)}catch(error){URL.revokeObjectURL(video.src);video.removeAttribute('src');video.load();setStatus(error.message)}finally{busy=false}};row.append(label);
+    try{await waitMedia(video);if(file.size!==clip.size||file.name!==clip.name||Math.abs(video.duration-clip.metadata.duration)>.1)throw new Error('Choose the original video with matching name, size, and duration.');releaseClip(clip);Object.assign(clip,{file,url:video.src,videoEl:video,missing:false,status:'Relinked'});list();setStatus('Relinked '+file.name)}catch(error){URL.revokeObjectURL(video.src);video.removeAttribute('src');video.load();setStatus(error.message)}finally{busy=false}};row.append(label);
 })};
 const oldSelect=select;select=function(index){if(busy)return;if(clips[index]?.missing){cur=index;list();showCues();renderTimeline();setStatus('Relink this video before playback or export.');return}oldSelect(index)};
 const oldDuration=storyDuration;storyDuration=function(c){const result=oldDuration(c);const allowance=Math.max(0,Math.min(3,Number($('end_tail').value)||0));result.end=+(result.end-result.allowance+allowance).toFixed(3);result.allowance=allowance;return result};
@@ -3353,7 +3388,7 @@ $('capabilities').onclick=async()=>{
  const report=['Video decode: '+(document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"')||'unavailable'),'IndexedDB: '+!!window.indexedDB,'Worker: '+!!window.Worker,'Web Audio: '+!!window.AudioContext,'WebCodecs: '+!!window.VideoEncoder,'Reported device memory: '+(navigator.deviceMemory?navigator.deviceMemory+' GB':'unavailable'),'Processing stays on this device; fonts and optional Whisper need network access.'];
  try{await exportConfig(W,H,8e6);report.push('H.264 + AAC export: supported at '+W+' × '+H)}catch(error){report.push(error.message)}await (window.studioAlert?.(report.join('\n'))??Promise.resolve());
 };
-$('analyze_media').onclick=async()=>{if(busy||!clips.length)return;busy=true;exportCancelled=false;showTaskProgress('Analyzing video',`Reading ${clips.length} clip${clips.length===1?'':'s'} for real cuts and motion…`,0);try{for(let i=0;i<clips.length;i++){const clip=clips[i];await ensureClipLoaded(clip);await analyzeClipScenes(clip,p=>{const pct=(i+p/100)/clips.length*100;updateTaskProgress(pct,`Analyzing ${clip.file.name}: ${p}%`,'Analyzing video');setStatus('Analyzing '+clip.file.name+': '+p+'%')})}updateTaskProgress(100,'Image analysis finished.','Analyzing video');setStatus('Image analysis finished. '+clips.reduce((n,c)=>n+(c._scenes?.length||0),0)+' candidate shots. Scene labels and narrative relevance require your review.')}catch(error){setStatus('Analysis failed: '+error.message)}finally{busy=false;hideTaskProgress()}};
+$('analyze_media').onclick=async()=>{if(busy||!clips.length)return;busy=true;exportCancelled=false;showTaskProgress('Analyzing video',`Reading ${clips.length} clip${clips.length===1?'':'s'} for real cuts and motion…`,0,()=>{exportCancelled=true});try{for(let i=0;i<clips.length;i++){const clip=clips[i];await ensureClipLoaded(clip);await analyzeClipScenes(clip,p=>{const pct=(i+p/100)/clips.length*100;updateTaskProgress(pct,`Analyzing ${clip.file.name}: ${p}%`,'Analyzing video');setStatus('Analyzing '+clip.file.name+': '+p+'%')})}updateTaskProgress(100,'Image analysis finished.','Analyzing video');setStatus('Image analysis finished. '+clips.reduce((n,c)=>n+(c._scenes?.length||0),0)+' candidate shots. Scene labels and narrative relevance require your review.')}catch(error){setStatus('Analysis failed: '+error.message)}finally{busy=false;hideTaskProgress()}};
 function stagePlan(c,edl){assertLocksUnchanged(c.edl,edl);pendingPlan={assetId:c.id,edl:cleanData(edl),align:cleanData(c.align||null),storyCues:cleanData(c.storyCues||null)};}
 function renderPlan(){
  if(!pendingPlan){setStatus('Generate a story plan first.');return}
@@ -3406,7 +3441,7 @@ const diskExport=document.createElement('button');diskExport.className='g sm';di
 $('project_toolbar').append(diskExport);
 diskExport.onclick=async()=>{if(busy||cur<0)return;showTaskProgress('Choose export destination','Select the folder and filename for the MP4…');try{const handle=await window.showSaveFilePicker({suggestedName:'SkimStudio.mp4',types:[{description:'MP4 video',accept:{'video/mp4':['.mp4']}}]});hideTaskProgress();await render(cur,false,handle)}catch(error){hideTaskProgress();if(error.name==='AbortError')setStatus('Direct export cancelled.');else setStatus('Direct export failed: '+error.message)}};
 const audioMeter=document.createElement('span');audioMeter.id='audio_meter';audioMeter.setAttribute('role','status');audioMeter.textContent='Mix peak: preview or export to measure';$('project_toolbar').append(audioMeter);
-document.addEventListener('click',event=>{if(busy&&!event.target.closest('#export_cancel,.alignment-cancel')&&!(edlPlaying&&event.target.closest('#play'))){event.preventDefault();event.stopImmediatePropagation()}},true);
+document.addEventListener('click',event=>{if(busy&&!event.target.closest('#export_cancel,.alignment-cancel,.task-progress-cancel')&&!(edlPlaying&&event.target.closest('#play'))){event.preventDefault();event.stopImmediatePropagation()}},true);
 document.addEventListener('input',()=>{if(!busy&&cur>=0&&isStoryMode()&&clips[cur].edl.length)seekToTimelineTime(lastKnownTime)});
 document.addEventListener('click',scheduleSave);
 const listWithRelink=list;list=function(){listWithRelink();[...$('list').children].forEach((row,index)=>{
@@ -3417,6 +3452,12 @@ const listWithRelink=list;list=function(){listWithRelink();[...$('list').childre
  };row.append(button);
 })};window.list=list;
 refreshReferenceCues=installReferenceControls({$,checkpoint,getClip:()=>clips[cur],setStatus,changed:()=>{if(cur>=0){$('ed').value=edlToText(clips[cur].edl);renderTimeline();if(clips[cur].edl.length)seekToTimelineTime(lastKnownTime)}scheduleSave()}});
+const applyPresetChanged=()=>{
+  if(cur>=0&&isStoryMode()&&clips[cur].edl.length)seekToTimelineTime(lastKnownTime);
+  scheduleSave();
+};
+presetUI=installPresetControls({$,checkpoint,changed:applyPresetChanged,setStatus,getClip:()=>clips[cur],isBusy:()=>busy});
+document.fonts?.addEventListener('loadingdone',()=>{clearPresetLayouts();applyPresetChanged()});
 $('sync_speech').onclick=whisperAlignWords;
 installSimpleEditor({
   $, pv, setStatus, seekToTimelineTime,

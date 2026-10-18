@@ -17,7 +17,9 @@ export function analyzeNarration(channels,sampleRate){
 export function inActivity(runs,time){
   if(!Array.isArray(runs))return true;
   // Half-open intervals: no carry into the first silent frame.
-  return runs.some(([start,end])=>time>=start&&time<end);
+  let lo=0,hi=runs.length;
+  while(lo<hi){const mid=(lo+hi)>>>1;if(runs[mid][0]<=time)lo=mid+1;else hi=mid}
+  return lo>0&&time<runs[lo-1][1];
 }
 export function captionEndTime(cue,words,offset=0){
   return words?.length?Math.max(0,Math.min(cue.e,cue.s+words.at(-1).e-offset)):0;

@@ -1,3 +1,4 @@
+import {invalidateTimeline} from './timelineIndex.js';
 export function finite(value, name, min = 0, max = Infinity) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) throw new Error(`${name} must be between ${min} and ${max}.`);
   return value;
@@ -25,19 +26,23 @@ export function validateCues(cues, limit = Infinity) {
 export function validateTimeline(edl, assets, owner) {
   if (!Array.isArray(edl)) throw new Error('Timeline must be an array.');
   let at = 0;
+  const byId=new Map(assets.map((asset,index)=>[asset.id,{asset,index}]));
+  const ownerIndex=assets.indexOf(owner);
   for (const segment of edl) {
-    const asset = segment.assetId ? assets.find(a => a.id === segment.assetId) : assets[segment.clipIdx ?? assets.indexOf(owner)];
+    const index=segment.assetId?byId.get(segment.assetId)?.index:segment.clipIdx??ownerIndex;
+    const asset=assets[index];
     if (!asset || asset.missing || !asset.videoEl) throw new Error('A timeline source is missing. Relink its media.');
     const duration = asset.videoEl.duration;
     finite(duration, 'Media duration', 0.001);
     finite(segment.s, 'Source in', 0, duration); finite(segment.e, 'Source out', 0, duration + 0.001);
     finite(segment.sp, 'Playback speed', 0.25, 4);
     if (segment.e <= segment.s) throw new Error('A shot has no duration.');
-    segment.clipIdx = assets.indexOf(asset); segment.assetId = asset.id;
+    segment.clipIdx = index; segment.assetId = asset.id;
     segment.id ||= crypto.randomUUID(); segment.trackId = 'video';
     segment.timelineStart = at; at += (segment.e - segment.s) / segment.sp; segment.timelineEnd = at;
     if (segment.tr) finite(segment.tr.d, 'Transition duration', 0, Math.min(1.2, segment.timelineEnd - segment.timelineStart));
   }
+  invalidateTimeline(edl);
   return at;
 }
 export function validateWords(tokens, limit = Infinity) {

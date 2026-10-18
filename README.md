@@ -40,6 +40,10 @@ Export checks container signature, duration, and decoding at the first, middle, 
 
 ## Captions and timing
 
+Three additional reusable styles are available in **Edit details → Captions**: **Kinetic Sports Upset**, **Streamer Flashbang Meme**, and **Dialogue Meme Caption**, each with a separate Apply button. They share the preview/export renderer, preserve the existing timeline and measured word times, retain manually edited settings, and support undo. New presets require complete word timings; untimed captions stay hidden until synchronized or imported. Dialogue speaker labels are manual annotations.
+
+See [PRESET_STYLES.md](PRESET_STYLES.md) for defaults, ownership, safe layout, offline fonts, migration, resource limits, manual editing guidance and adding future presets. The engineering checklist is [PRESET_AUDIT.md](PRESET_AUDIT.md).
+
 Speech-energy timing is an estimate, even when every word has a numeric interval. It is never verified transcription. Imported word times must be ordered, nonoverlapping and match the current caption text. Cue bounds are rebuilt from those words, so an old delayed cue cannot clamp correct timestamps. Cues split at meaningful pauses. Supported examples:
 
 ```json

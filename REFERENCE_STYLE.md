@@ -36,3 +36,7 @@ An example rendered with the actual caption engine is included as `release/refer
 Six additional unit tests cover phrase balancing, editable colors, grouping, bounded motion, word reveal, and caption end gating. A third browser integration scenario checks preset timing preservation, locked framing protection, emphasis save/load, local font loading with Google Fonts blocked, manual labeled callouts, and rendering at 360×640 and 1080×1920.
 
 The existing MP4 export test also runs with Reference Story as the default style. Exact semantic cut selection and speech-ground-truth accuracy still need user review; copying typography cannot establish those capabilities.
+# Additional reusable presets
+
+Kinetic Sports Upset, Streamer Flashbang Meme and Dialogue Meme Caption are separate additions described in [PRESET_STYLES.md](PRESET_STYLES.md). Reference Story retains its definition, dedicated Apply control and renderer.
+

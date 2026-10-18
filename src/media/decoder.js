@@ -1,16 +1,17 @@
-export function waitMedia(video, timeout = 15000) {
+export function waitMedia(video, timeout = 15000, cancelled=()=>false) {
   return new Promise((resolve, reject) => {
-    const finish = error => { clearTimeout(timer); video.removeEventListener('loadeddata', ready); video.removeEventListener('error', failed); error ? reject(error) : resolve(video.duration); };
+    const finish = error => { clearTimeout(timer); clearInterval(poll); video.removeEventListener('loadeddata', ready); video.removeEventListener('error', failed); error ? reject(error) : resolve(video.duration); };
     const ready = () => { if (video.readyState >= 2 && Number.isFinite(video.duration) && video.duration > 0 && video.videoWidth > 0) finish(); };
     const failed = () => finish(new Error('The browser could not decode this video. Try an H.264 MP4.'));
     const timer = setTimeout(() => finish(new Error('Video decoding timed out.')), timeout);
-    video.addEventListener('loadeddata', ready); video.addEventListener('error', failed); ready();
+    const poll=setInterval(()=>{if(cancelled())finish(new Error('cancelled'))},50);
+    video.addEventListener('loadeddata', ready); video.addEventListener('error', failed); if(cancelled())finish(new Error('cancelled'));else ready();
   });
 }
 export async function seekFrame(video, requested, cancelled = () => false) {
   if (cancelled()) throw new Error('cancelled');
   if (!Number.isFinite(requested)) throw new Error('Invalid frame timestamp.');
-  await waitMedia(video);
+  await waitMedia(video,15000,cancelled);
   const target = Math.max(0, Math.min(video.duration - 0.001, requested));
   if (Math.abs(video.currentTime - target) < 0.0005 && video.readyState >= 2 && !video.seeking) return;
   await new Promise((resolve, reject) => {
@@ -27,6 +28,6 @@ export async function seekFrame(video, requested, cancelled = () => false) {
     const poll = setInterval(() => { if (cancelled()) finish(new Error('cancelled')); }, 50);
     video.addEventListener('seeked', ready); video.addEventListener('error', failed);
     if(video.requestVideoFrameCallback) callback=video.requestVideoFrameCallback(()=>{presented=true;if(sought)finish()});
-    video.currentTime = target;
+    try{video.currentTime = target}catch(error){finish(error)}
   });
 }

@@ -235,6 +235,17 @@
         </details>
       </div>
 
+      <div class="sec preset-style-panel" aria-label="Reusable editing presets">
+        <div class="sec-title">Reusable caption presets</div>
+        <p class="reference-note">These presets style the existing narration and word timings. They do not infer wins, flashbangs, speakers, or other semantic events. For labels, write prefixes such as FAN: or CELEBRITY: in the narration text.</p>
+        <div class="row preset-actions">
+          <button id="apply_sports_upset" class="g sm">Apply Sports Upset</button>
+          <button id="apply_streamer_flashbang" class="g sm">Apply Streamer Flashbang</button>
+          <button id="apply_dialogue_meme" class="g sm">Apply Dialogue Meme</button>
+        </div>
+        <div class="row"><label for="streamer_bw_reaction"><input type="checkbox" id="streamer_bw_reaction"> Streamer B&amp;W reaction treatment (manual red cue only)</label></div>
+      </div>
+
       <div class="sec">
         <div class="sec-title"><span>Typography &amp; Layout</span><label><input type="checkbox" id="cap" checked> Show</label></div>
         <div class="row">
@@ -312,7 +323,11 @@
         <div class="row">
           <label style="min-width:55px">Style</label>
           <select id="cs" style="flex:1">
-            <option value="reference" selected>Reference Story (white + vivid emphasis)</option><option value="shorts">Shorts Viral (active word pop &amp; bounce)</option>
+            <option value="reference" selected>Reference Story (white + vivid emphasis)</option>
+            <option value="kinetic-sports-upset">Kinetic Sports Upset</option>
+            <option value="streamer-flashbang-meme">Streamer Flashbang Meme</option>
+            <option value="dialogue-meme-caption">Dialogue Meme Caption</option>
+            <option value="shorts">Shorts Viral (active word pop &amp; bounce)</option>
             <option value="pop">Highlight Word (full sentence)</option>
             <option value="pill">Pill Box (dark rounded background)</option>
             <option value="bold">Bold Outline (heavy drop-shadow)</option>

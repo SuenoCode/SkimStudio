@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 async function openAdvancedTools(page){
- await page.locator('[data-view="timeline"]').click();
  await page.locator('#simple-open-tools').click();
+ await page.evaluate(()=>{window.studioConfirm=async()=>true});
  await expect(page.locator('#advanced_tools_dialog')).toBeVisible();
  const details=page.locator('.timeline-advanced');
  if(!(await details.evaluate(element=>element.open)))await details.locator('summary').click();
@@ -22,13 +22,13 @@ test('media import, reviewed build, persistence, captions and MP4 export',async(
  await page.locator('#plan_apply').click();await expect(page.locator('#ed')).not.toHaveValue('');
  await page.locator('#project_undo').click();await expect(page.locator('#ed')).toHaveValue('');await page.locator('#project_redo').click();await expect(page.locator('#ed')).not.toHaveValue('');
  await page.locator('#project_save').click();await page.locator('#project_load').click();await expect(page.locator('#st')).toContainText('Project loaded');await expect(page.locator('#ed')).not.toHaveValue('');
- await page.locator('#play').click();await expect(page.locator('#audio_meter')).toContainText('dBFS');await page.locator('#play').click();await expect(page.locator('#play')).toHaveText(/^▶/);
+ await page.locator('#simple-tools-close').click();await page.locator('#play').click();await expect(page.locator('#audio_meter')).toContainText('dBFS');await page.locator('#play').click();await expect(page.locator('#play')).toHaveText(/^▶/);
  const captions=await page.evaluate(()=>{
   const canvas=document.createElement('canvas');canvas.width=360;canvas.height=640;const ctx=canvas.getContext('2d'),drawn=[];ctx.fillText=(t)=>drawn.push(t);ctx.strokeText=()=>{};
   const cue={s:1,e:2,t:'Hello world',w:[{s:.1,e:.3},{s:.6,e:.9}]};const options={w:360,h:640,fs:36,cf:'sans-serif',sw:'none',cs:'progressive',chunk_size:'all',cy:.5,cx_pos:.5};
   window.caps(ctx,cue,1.05,options);const before=drawn.slice();drawn.length=0;window.caps(ctx,cue,1.15,options);const first=drawn.slice();drawn.length=0;window.caps(ctx,cue,2.1,options);return{before,first,after:drawn};
  });expect(captions).toEqual({before:[],first:['Hello'],after:[]});
- await page.locator('#export_resolution').selectOption('360x640');await page.locator('#exp').click();
+ await openAdvancedTools(page);await page.locator('#export_resolution').selectOption('360x640');await page.locator('#simple-tools-close').click();await page.locator('#exp').click();
  await expect(page.locator('#st')).toHaveText(/Export finished|Export failed/, {timeout:60000});
  const status=await page.locator('#st').textContent();console.log('EXPORT:',status);
  if(status.includes('Export finished')){await expect(page.locator('#share_dlg')).toBeVisible();expect(await page.locator('#share_v').evaluate(v=>v.src.startsWith('blob:'))).toBeTruthy();const download=page.waitForEvent('download');await page.locator('#share_dl').click();await (await download).saveAs('test-results/verified-export.mp4');await page.evaluate(()=>window.closeShareDialog())}
@@ -41,9 +41,9 @@ test('media import, reviewed build, persistence, captions and MP4 export',async(
  });expect(streamed.size).toBeGreaterThan(32);expect(streamed.status).toContain('Export finished');await page.evaluate(()=>window.closeShareDialog());
  await page.screenshot({path:'test-results/studio-desktop.png',fullPage:true});
  // Cancellation must not create a success state; the next export remains possible.
- await page.locator('#export_resolution').selectOption('1080x1920');await page.locator('#exp').click();await expect(page.locator('#export_cancel')).toBeVisible();await page.locator('#export_cancel').click();await expect(page.locator('#st')).toContainText('Export cancelled',{timeout:20000});await expect(page.locator('#share_dlg')).not.toBeVisible();
+ await openAdvancedTools(page);await page.locator('#export_resolution').selectOption('1080x1920');await page.locator('#simple-tools-close').click();await page.locator('#exp').click();await expect(page.locator('#export_cancel')).toBeVisible();await page.locator('#export_cancel').click();await expect(page.locator('#st')).toContainText('Export cancelled',{timeout:20000});await expect(page.locator('#share_dlg')).not.toBeVisible();
  // Reopening a metadata-only save requires explicit relinking and narration import.
- await page.reload();await page.locator('#project_load').click();await expect(page.locator('#list')).toContainText('Relink video');await page.locator('#list input[type=file]').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list')).toContainText('Relinked');
+ await page.reload();await openAdvancedTools(page);await page.locator('#project_load').click();await expect(page.locator('#list')).toContainText('Relink video');await page.locator('#list input[type=file]').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list')).toContainText('Relinked');
  expect(errors).toEqual([]);
 });
 test('worker footage analysis and multi-clip story review preserve manual captions',async({page})=>{
