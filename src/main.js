@@ -2584,29 +2584,30 @@ async function analyzeFootage(clip,onProgress){
 // so the cut lands on action instead of on dead time.
 function bestRangeInShot(sh,ana,want){
   const dead=(ana&&ana.dead)||[];
-  const len=+(sh.e-sh.s).toFixed(3);
-  if(len<=want+0.01)return{s:sh.s,e:sh.e};
+  const start=Math.max(0,Number(sh.s)||0),end=Math.max(start,Number(sh.e)||start);
+  const len=end-start;
+  if(len<=want+0.01)return{s:start,e:end};
   const ev=(ana&&ana.events)||[];
   // prefer a range that contains a detected key moment
   let best=null;
   for(const e of ev){
     if(e.shot!==sh.idx)continue;
-    const a=Math.max(sh.s,Math.min(e.t-want/2,sh.e-want));
+    const a=Math.max(start,Math.min(e.t-want/2,end-want));
     const inDead=dead.some(d=>a<d.e&&a+want>d.s);
     const sc=e.strength-(inDead?3:0);
-    if(!best||sc>best.sc)best={s:+a.toFixed(3),e:+(a+want).toFixed(3),sc};
+    if(!best||sc>best.sc)best={s:a,e:Math.min(end,a+want),sc};
   }
   if(best)return{s:best.s,e:best.e};
   // otherwise slide to dodge dead time
-  let a=sh.s;
+  let a=start;
   for(let k=0;k<8;k++){
     const hit=dead.find(d=>a<d.e-0.05&&a+want>d.s+0.05);
     if(!hit)break;
     a=+(hit.e+0.02).toFixed(3);
-    if(a+want>sh.e){a=sh.s;break}
+    if(a+want>end){a=start;break}
   }
-  if(a+want>sh.e)a=+(sh.e-want).toFixed(3);
-  return{s:Math.max(sh.s,a),e:Math.min(sh.e,a+want)};
+  if(a+want>end)a=end-want;
+  return{s:Math.max(start,a),e:Math.min(end,a+want)};
 }
 
 // ============================================================================
@@ -2783,13 +2784,17 @@ function shotPool(pool){
       ?c._scenes
       :[{s:0,e:Math.min(dur,30),motion:0,action:0,steady:0,edge:0,bright:.5,idx:0}];
     sc.forEach(s=>{
-      const len=s.e-s.s;
+      // Scene analysis is sampled and rounded; normalize its bounds to the exact
+      // decoded media duration before it can become an EDL source range.
+      const sceneStart=Math.max(0,Math.min(dur,Number(s.s)||0));
+      const sceneEnd=Math.max(sceneStart,Math.min(dur,Number(s.e)||sceneStart));
+      const len=sceneEnd-sceneStart;
       if(len<0.6)return;
       // Long takes are split into usable pieces, but each piece keeps the key moments
       // and dead stretches that fall inside it.
       const parts=Math.max(1,Math.floor(len/9));
       for(let p=0;p<parts;p++){
-        const a=s.s+len*(p/parts),b=s.s+len*((p+1)/parts);
+        const a=sceneStart+len*(p/parts),b=sceneStart+len*((p+1)/parts);
         const mine=((ana&&ana.events)||[]).filter(e=>e.t>=a&&e.t<=b);
         const dead=((ana&&ana.dead)||[]).filter(d=>d.s<b&&d.e>a);
         shots.push({ci,si:s.idx!=null?s.idx:0,p,s:a,e:b,len:b-a,
@@ -2918,8 +2923,13 @@ async function buildStoryEdit(){
           sp=Math.max(.25,avail/shotLen);              // never more than 1.35x slow
           useLen=shotLen*sp;
         }
-        const sPos=+Math.max(0,range.s).toFixed(2);
-        const ePos=Math.min(clips[sh.ci].videoEl.duration,range.e,range.s+useLen);
+        const sourceDuration=clips[sh.ci].videoEl.duration;
+        const rawStart=Math.max(0,Math.min(sourceDuration,Number(range.s)||0));
+        const rawEnd=Math.max(rawStart,Math.min(sourceDuration,Number(range.e)||rawStart,rawStart+useLen));
+        // Round only after clamping, then clamp again because a rounded source start
+        // can otherwise exceed a duration such as 8.659186 by a fraction.
+        const sPos=Math.min(sourceDuration,+rawStart.toFixed(3));
+        const ePos=Math.min(sourceDuration,Math.max(sPos+0.001,+rawEnd.toFixed(3)));
         const onAction=((sh.events||[]).some(e=>e.t>=range.s&&e.t<=range.e));
 
         // Keep the transition language consistent across every edit. A short,
