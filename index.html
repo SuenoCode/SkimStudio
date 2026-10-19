@@ -58,7 +58,7 @@
 </div>
 <dialog id="plan_dialog" style="background:var(--card);color:var(--tx);border:1px solid var(--ac);max-width:95vw;width:1000px;max-height:85vh">
   <h2>Review story plan</h2><p id="plan_note"></p>
-  <p>Selection uses image statistics and your clip notes. It does not recognize people, actions, or outcomes. Review every source choice.</p>
+  <p id="plan_evidence_guidance">Review every source choice and its evidence before applying the plan.</p>
   <div style="overflow:auto;max-height:55vh"><table style="width:100%;text-align:left"><thead><tr><th>Narration / role</th><th>Source / in–out</th><th>Timeline</th><th>Evidence</th></tr></thead><tbody id="plan_rows"></tbody></table></div>
   <div class="row"><button id="plan_apply">Apply reviewed plan</button><button class="g" id="plan_cancel">Close review</button></div>
 </dialog>
@@ -146,7 +146,7 @@
           </div>
           <div class="row">
             <label>AI story model</label>
-            <input class="in" id="m_story_model" placeholder="Server default (openrouter/free)" spellcheck="false" style="flex:1">
+            <input class="in" id="m_story_model" value="openrouter/free" placeholder="openrouter/free" spellcheck="false" style="flex:1">
           </div>
           <p class="reference-note">AI uses the local server's OpenRouter configuration. Selected frames and narration are sent to the model provider. Only confirmed free models are allowed.</p>
           <div class="row">
@@ -668,7 +668,7 @@
 <dialog id="story_audit_dialog" class="story-audit-dialog" aria-labelledby="story_audit_title">
   <div class="story-audit-header"><div><div class="audit-kicker">SKIMSTUDIO / AI REVIEW</div><h2 id="story_audit_title">AI Story Auditor</h2><p>Audits sampled frames of the final MP4 against your script. OpenRouter credentials are configured on the local server.</p></div><button class="g sm" id="story_audit_close">Close</button></div>
   <div class="story-audit-controls">
-    <label>Model<input id="m_audit_model" list="m_audit_models" placeholder="Server default (openrouter/free)" spellcheck="false"><datalist id="m_audit_models"><option value="openrouter/free">Free model router</option></datalist></label>
+    <label>Model<input id="m_audit_model" list="m_audit_models" value="openrouter/free" placeholder="openrouter/free" spellcheck="false"><datalist id="m_audit_models"><option value="openrouter/free">Free model router</option></datalist></label>
     <label>Frame samples<input id="m_audit_count" type="number" min="3" max="12" step="1" value="12"></label>
     <div class="story-audit-actions"><button class="g sm" id="story_audit_models">Load free models</button><button id="story_audit_run" disabled>Audit final export</button><button class="g sm" id="story_audit_cancel" hidden>Cancel audit</button></div>
   </div>
@@ -678,7 +678,7 @@
     <div class="story-audit-summary"><div><span class="audit-kicker">VERDICT</span><strong id="story_audit_verdict" class="audit-verdict">—</strong></div><div id="story_audit_scores" class="story-audit-scores"></div></div>
     <div class="story-audit-grid"><div><h3>Reconstructed story</h3><p id="story_audit_story"></p></div><div><h3>Issues and evidence</h3><div id="story_audit_issues"></div></div></div>
     <div class="story-audit-grid"><div><h3>Recommended solution plan</h3><pre id="story_audit_solution"></pre></div><div><h3>Limitations</h3><ul id="story_audit_limitations"></ul></div></div>
-    <div class="story-audit-actions"><button class="g sm" id="story_audit_download">Download Markdown report</button></div>
+    <div class="story-audit-actions"><button class="g sm" id="story_audit_repair" disabled>Build repair plan</button><button class="g sm" id="story_audit_download">Download Markdown report</button></div>
   </section>
 </dialog>
 <div class="export-overlay" id="export_overlay">

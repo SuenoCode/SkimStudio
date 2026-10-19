@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {AUDIT_RESPONSE_SCHEMA,STORY_PLAN_SCHEMA,auditMarkdown,localBeatPlan,normalizeAudit,normalizeBeats,normalizeStoryPlan,runStoryAudit,scriptLines} from '../src/audit/storyAuditor.js';
+import {AUDIT_RESPONSE_SCHEMA,STORY_PLAN_SCHEMA,auditMarkdown,localBeatPlan,normalizeAudit,normalizeBeats,normalizeStoryPlan,runStoryAudit,runStoryPlanner,scriptLines} from '../src/audit/storyAuditor.js';
 import {plan,audit,beats,metadata} from './fixtures/ai.js';
 
 test('story script parsing produces six ordered beats before visual review',()=>{
@@ -37,6 +37,12 @@ test('story planner rejects invalid references, intervals, enums, sections and i
  const empty=plan();empty.shotPlan=[];assert.throws(()=>normalizeStoryPlan(empty,context));
  assert.throws(()=>normalizeStoryPlan(plan(),{...context,sectionCount:2}));
  assert.deepEqual(STORY_PLAN_SCHEMA.required,['beats','shotPlan','payoff','validationChecklist']);
+});
+
+test('story planner retries incomplete output once with a concise one-shot-per-section request',async()=>{
+ let calls=0;let retryPrompt='';
+ const result=await runStoryPlanner({script:'A result.',duration:1,sections:[{index:0,start:0,end:1,role:'open',text:'A result.'}],shots:[{id:'shot-a',sourceStart:0,sourceEnd:1}],provider:{async completeJSON(options){calls++;if(calls===1)throw{code:'OUTPUT_INCOMPLETE'};retryPrompt=options.messages.at(-1).content[0].text;return{data:plan(),metadata:metadata()};}}});
+ assert.equal(calls,2);assert.match(retryPrompt,/exactly one source shot for every timeline section/);assert.equal(result.requestMetadata.recoveredFromIncompleteOutput,true);assert.equal(result.shotPlan.length,1);
 });
 
 test('schema-valid but inconsistent audit PASS requires revision and retains actual provider metadata',async()=>{

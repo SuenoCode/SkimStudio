@@ -49,8 +49,14 @@ test('images cannot be sent to a text-only model and remote image URLs are rejec
   await assert.rejects(provider.completeJSON({...options,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'https://example.com/a.jpg'}}]}]}),error=>error.code==='INVALID_REQUEST');
   assert.equal(requests.length,1);
 });
-test('invalid JSON, schema violations, truncation and excess response bytes cannot succeed',async()=>{
-  for(const body of [reply({},{}),reply(beats(6),{choices:[{finish_reason:'length',message:{content:'{}'}}]}),reply(beats(6),{choices:[{finish_reason:'stop',message:{content:'prefix {"beats":[]} suffix'}}]})]){
+test('truncation is distinguishable from malformed JSON and schema violations',async()=>{
+  const {provider:truncatedProvider}=harness(async()=>Response.json(reply(beats(6),{choices:[{finish_reason:'length',message:{content:'{}'}}]})));
+  await assert.rejects(truncatedProvider.completeJSON(options),error=>error.code==='OUTPUT_TRUNCATED'&&error.diagnostics.finishReason==='length');
+  const {provider:incompleteProvider}=harness(async()=>Response.json(reply(beats(6),{choices:[{finish_reason:'tool_calls',message:{content:'{}'}}]})));
+  await assert.rejects(incompleteProvider.completeJSON(options),error=>error.code==='OUTPUT_INCOMPLETE'&&error.diagnostics.finishReason==='tool_calls');
+  const {provider:filteredProvider}=harness(async()=>Response.json(reply(beats(6),{choices:[{finish_reason:'content_filter',message:{content:''}}]})));
+  await assert.rejects(filteredProvider.completeJSON(options),error=>error.code==='MODEL_REFUSAL');
+  for(const body of [reply({},{}),reply(beats(6),{choices:[{finish_reason:'stop',message:{content:'prefix {"beats":[]} suffix'}}]})]){
     const {provider}=harness(async()=>Response.json(body));await assert.rejects(provider.completeJSON(options),error=>error.code==='INVALID_MODEL_OUTPUT');
   }
   assert.throws(()=>parseModelJSON('{"incomplete":'),error=>error.code==='INVALID_MODEL_OUTPUT');
@@ -65,7 +71,7 @@ test('timeout and caller cancellation stop requests and release the queue',async
     if(!hung)return Response.json(reply(beats(6)));
     return new Promise((resolve,reject)=>{const timer=setTimeout(()=>resolve(Response.json(reply(beats(6)))),1000);signal.addEventListener('abort',()=>{clearTimeout(timer);reject(signal.reason);},{once:true});});
   }});
-  await assert.rejects(provider.completeJSON(options),error=>error.code==='TIMEOUT');
+  await assert.rejects(provider.completeJSON(options),error=>error.code==='TIMEOUT'&&/choose another free vision model/.test(error.message));
   const controller=new AbortController();const pending=provider.completeJSON({...options,signal:controller.signal});setTimeout(()=>controller.abort(),5);
   await assert.rejects(pending,error=>error.code==='CANCELLED');
   hung=false;assert.equal((await provider.completeJSON(options)).data.beats.length,6);

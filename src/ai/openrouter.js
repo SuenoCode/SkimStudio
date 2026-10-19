@@ -76,7 +76,7 @@ export function createOpenRouter({apiKey,defaultModel=DEFAULT_MODEL,fetchImpl=fe
       return payload;
     }catch(error){
       if(signal?.aborted){if(signal.reason?.name==='TimeoutError')throw new AIError('TIMEOUT','AI job exceeded its time budget.',{status:504});cancelled(signal);}
-      if(requestSignal.aborted)throw new AIError('TIMEOUT','OpenRouter request timed out.',{status:504});
+      if(requestSignal.aborted)throw new AIError('TIMEOUT',`OpenRouter did not respond within ${Math.max(1,Math.round(policy.timeoutMs/1000))} seconds. Retry, or choose another free vision model; your current timeline was not changed.`,{status:504});
       if(error instanceof AIError)throw error;
       throw new AIError('NETWORK_ERROR','Could not reach OpenRouter.',{status:502,retryable:true});
     }
@@ -111,7 +111,14 @@ export function createOpenRouter({apiKey,defaultModel=DEFAULT_MODEL,fetchImpl=fe
         try{
           const payload=await request('/chat/completions',{body,signal:totalSignal,retry:retries});
           const choice=payload.choices?.[0];
-          if(choice?.finish_reason!=='stop')throw new AIError('INVALID_MODEL_OUTPUT','The model did not finish a complete JSON response.',{status:422});
+          if(choice?.finish_reason!=='stop'){
+            const rawReason=choice?.finish_reason;
+            const finishReason=typeof rawReason==='string'&&/^[a-z0-9_-]{1,40}$/i.test(rawReason)?rawReason.toLowerCase():'unknown';
+            const diagnostics={finishReason,usage:payload.usage||null};
+            if(finishReason==='length')throw new AIError('OUTPUT_TRUNCATED','The model reached its output limit before completing JSON.',{status:422,diagnostics});
+            if(finishReason==='content_filter')throw new AIError('MODEL_REFUSAL','The selected model filtered the story planning response. Try another free vision model.',{status:422,diagnostics});
+            throw new AIError('OUTPUT_INCOMPLETE',`OpenRouter ended the response early (finish reason: ${finishReason}).`,{status:422,diagnostics});
+          }
           const content=choice.message?.content;
           const data=validateResponse(schemaName,parseModelJSON(Array.isArray(content)?content.map(part=>part.text||'').join(''):content));
           const usage={};for(const key of ['prompt_tokens','completion_tokens','total_tokens'])if(Number.isFinite(payload.usage?.[key]))usage[key]=payload.usage[key];
