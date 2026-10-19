@@ -103,6 +103,11 @@ test('dialogue backing and speaker labels appear only with speech',()=>{
  assert.equal(ctx.boxes.length,1);assert.ok(ctx.records.some(r=>r.text==='FAN:'&&r.color===p.colors.magenta));
  const silent=context();renderPresetCaption(silent,c,1.8,{w:360,h:640},measuredWords(c),p);assert.equal(silent.boxes.length,0);
 });
+test('preset captions stay hidden while their narration timing is stale',()=>{
+ const ctx=context(),p=PRESETS[0];
+ renderPresetCaption(ctx,cue,1.1,{w:360,h:640,captionTimingStale:true},measuredWords(cue),p);
+ assert.equal(ctx.records.length,0);assert.equal(ctx.boxes.length,0);
+});
 test('accents use exact normalized text or explicit words, never substring matches',()=>{
  assert.equal(accentColor(PRESETS[0],'hello',{}),'#ffffff');
  assert.equal(accentColor(PRESETS[0],'WON!',{}),PRESETS[0].colors.cyan);
@@ -122,6 +127,8 @@ test('effects are deterministic and black-and-white ends exactly with manual cue
  const config=PRESETS[1],c={...cue,presetAccent:'red'},options={presetMotion:true,presetShake:true,presetGlitch:true,presetBw:true,segDur:2};
  const state=()=>presetFrameState(config,options,[c],measuredWords,1.1,.04,{});
  assert.deepEqual(state(),state());assert.equal(state().bw,true);
+ assert.ok(Math.abs(state().shakeX)<=1.2&&Math.abs(state().shakeY)<=1.2);
+ assert.ok(state().glitch<=.75);
  assert.equal(presetFrameState(config,options,[c],measuredWords,1.8,.04,{}).bw,false);
 });
 test('large multi-clip timelines have indexed lookup and edits invalidate offsets without retiming narration',()=>{

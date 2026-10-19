@@ -18,6 +18,12 @@ test('word timing gaps blank captions when no narration file is available',()=>{
  const cue={s:0,e:2},words=[{s:0,e:.5},{s:1,e:1.5}];assert.equal(captionIsActive(cue,.7,words),false);assert.equal(captionIsActive(cue,1.1,words),true);
  assert.equal(captionEndTime(cue,words),1.5);assert.equal(captionEndTime(cue,[]),0);
 });
+test('short measured gaps are silent and stale timings never render',()=>{
+ const cue={s:0,e:1,t:'one two'},words=[{s:0,e:.4},{s:.45,e:.8}];
+ assert.equal(captionIsActive(cue,.425,words),false);
+ assert.equal(captionIsActive(cue,.5,words),true);
+ assert.equal(captionIsActive(cue,.5,words,{captionTimingStale:true}),false);
+});
 test('reference captions do not use the previous word to fill a silent gap',()=>{
  let draws=0;const ctx={save(){},restore(){},measureText:text=>({width:text.length*10}),translate(){},scale(){},strokeText(){},fillText(){draws++},globalAlpha:1};
  renderReferenceCaption(ctx,{s:0,e:2,t:'hello world'},.8,{w:360,h:640},[{t:'hello',s:0,e:.5},{t:'world',s:1,e:1.5}]);assert.equal(draws,0);
@@ -38,6 +44,10 @@ test('mismatched words are rejected atomically rather than assigned someone else
 });
 test('recognizer hallucinations in a silent end tail are removed',()=>{
  const result=clipTokensToActivity([{text:'frog',start:.9,end:1.3},{text:'you',start:2,end:2.2}],[[.8,1.2]]);assert.deepEqual(result,[{text:'frog',start:.9,end:1.2}]);
+});
+test('recognized words never span a detected pause',()=>{
+ const result=clipTokensToActivity([{text:'word',start:.4,end:.8}],[[0,.5],[.7,1]]);
+ assert.deepEqual(result,[{text:'word',start:.7,end:.8}]);
 });
 test('split contraction tokens map only to the same normalized script word',()=>{
  const result=alignedCues([{t:"Didn't ask"}],[{text:'Did',start:0,end:.2},{text:"n't",start:.2,end:.3},{text:'ask',start:.3,end:.6}]);assert.equal(result[0].w[0].e,.3);

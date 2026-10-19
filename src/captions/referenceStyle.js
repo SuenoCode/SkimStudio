@@ -33,6 +33,7 @@ export function referenceMotion(base,elapsed,duration){
   return {...base,fz:base.fz*(1+.045*ease)};
 }
 export function renderReferenceCaption(ctx,cue,time,options,words){
+  if(options.captionTimingStale)return;
   if(!captionIsActive(cue,time,words,options))return;
   const relative=time-cue.s+(options.wordOffset||0);
   if(!words.length||time<cue.s||time>=cue.e||relative<words[0].s||relative>=words.at(-1).e)return;

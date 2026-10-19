@@ -25,21 +25,26 @@ export function captionEndTime(cue,words,offset=0){
   return words?.length?Math.max(0,Math.min(cue.e,cue.s+words.at(-1).e-offset)):0;
 }
 export function captionIsActive(cue,time,words,options={}){
+  if(options.captionTimingStale)return false;
   const offset=options.wordOffset||0,clock=time+offset;
   if(!Number.isFinite(time)||clock<cue.s||clock>=cue.e||!words?.length)return false;
   if(!inActivity(options.speechRuns,time))return false;
   const relative=clock-cue.s;
   if(relative<words[0].s||relative>=words.at(-1).e)return false;
-  if(words.some(word=>relative>=word.s&&relative<word.e))return true;
-  const previous=words.findLast(word=>word.e<=relative),next=words.find(word=>word.s>relative);
-  return !!(previous&&next&&next.s-previous.e<.08);
+  // A measured pause is part of the audio timing. Never bridge it by leaving the
+  // previous word on screen or by starting the next one early.
+  return words.some(word=>relative>=word.s&&relative<word.e);
 }
 export function clipTokensToActivity(tokens,runs){
   return tokens.flatMap(token=>{
     if(!Number.isFinite(token.start)||!Number.isFinite(token.end)||token.end<=token.start)return [];
     const overlaps=runs.map(([s,e])=>[Math.max(s,token.start),Math.min(e,token.end)]).filter(([s,e])=>e>s);
     if(!overlaps.length)return [];
-    return [{...token,start:overlaps[0][0],end:overlaps.at(-1)[1]}];
+    // A recognizer token can straddle a detector pause. Choosing the largest
+    // contiguous overlap keeps the word inside voiced audio instead of stretching
+    // its caption across silence.
+    const overlap=overlaps.reduce((best,current)=>current[1]-current[0]>best[1]-best[0]?current:best);
+    return [{...token,start:overlap[0],end:overlap[1]}];
   });
 }
 export function anchorRecognizedOnsets(tokens,runs){

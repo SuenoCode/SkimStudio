@@ -626,6 +626,7 @@ function splitLines(t,maxWords){
 
 // CAPTION RENDERING ENGINE
 function caps(ctx,c,t,o){
+  if(c.captionTimingStale)return;
   const config=getPreset(o.cs);
   if(config)return renderPresetCaption(ctx,c,t,{...o,wordOffset:wordOffsetSec()},measuredWords(c),config);
   if(!captionIsActive(c,t,cueWords(c),{...o,wordOffset:wordOffsetSec()}))return;
@@ -1182,6 +1183,7 @@ function opts(w,h,c){
     captionIntro:Number($('cfade').value)/100,
     referenceStyle:$('cs').value==='reference',
     speechRuns:c.aud?.speechRuns??c.aud?.runs??null,
+    captionTimingStale:!!c.captionTimingStale,
     referenceAccent:$('reference_accent')?.value||'auto',
     referenceWords:Number($('reference_words')?.value)||8,
     referenceReveal:$('reference_reveal')?.value||'line',
@@ -1329,9 +1331,16 @@ async function loadAud(f,c){
   const ac=new AudioContext();let buf;
   try{buf=await ac.decodeAudioData(await f.arrayBuffer())}finally{await ac.close()}
   if(buf.duration>300)throw new Error('Narration limit is five minutes.');
-  const previous=c.aud||c.narration,activity=analyzeNarration(Array.from({length:buf.numberOfChannels},(_,channel)=>buf.getChannelData(channel)),buf.sampleRate);
-  if(previous&&(previous.name!==f.name||Math.abs((previous.dur||0)-buf.duration)>.05)){c.wordAlignment=null;c.captionTimingStale=!!c.cues.length;}
-  c.aud={buf,name:f.name,dur:buf.duration,runs:activity.runs,speechRuns:activity.runs,waveform:activity.levels};
+  const previous=c.aud||c.narration;
+  const sourceKey=[f.name,f.size,f.lastModified||0].join(':');
+  const previousKey=previous?.sourceKey;
+  const changed=previous&&(
+    previousKey?previousKey!==sourceKey:
+    previous.name!==f.name||Math.abs((previous.dur||0)-buf.duration)>.05
+  );
+  const activity=analyzeNarration(Array.from({length:buf.numberOfChannels},(_,channel)=>buf.getChannelData(channel)),buf.sampleRate);
+  if(changed){c.wordAlignment=null;c.captionTimingStale=!!c.cues.length;}
+  c.aud={buf,name:f.name,size:f.size,lastModified:f.lastModified||0,sourceKey,dur:buf.duration,runs:activity.runs,speechRuns:activity.runs,waveform:activity.levels};
 }
 
 // SMART AUDIO-TO-CAPTION ALIGNMENT (Precision Snapping to VoiceStudio speech pauses & syllables)
@@ -3318,7 +3327,7 @@ function projectSnapshot() {
   return {
     version:1, script:$('sc').value, selectedId:clips[cur]?.id, captionPreset:$('cs').value,presetState:presetUI?.controller.snapshot(),
     settings:Object.fromEntries([...document.querySelectorAll('input[id],select[id]')].filter(el=>el.type!=='file'&&!el.id.startsWith('m_')).map(el=>[el.id,el.type==='checkbox'?el.checked:el.value])),
-    clips:clips.map(c=>({id:c.id,name:c.file.name,size:c.file.size,type:c.file.type,metadata:c.metadata||{duration:c.videoEl?.duration},tags:c.tags||'',use:c.use!==false,cues:cleanData(c.cues),fx:cleanData(c.fx),edl:cleanData(c.edl),align:cleanData(c.align||null),wordAlignment:cleanData(c.wordAlignment||null),captionTimingStale:!!c.captionTimingStale,storyCues:cleanData(c.storyCues||null),cuesEdited:!!c.cuesEdited,fxEdited:!!c.fxEdited,narration:c.aud?{name:c.aud.name,dur:c.aud.dur}:c.narration||null}))
+    clips:clips.map(c=>({id:c.id,name:c.file.name,size:c.file.size,type:c.file.type,metadata:c.metadata||{duration:c.videoEl?.duration},tags:c.tags||'',use:c.use!==false,cues:cleanData(c.cues),fx:cleanData(c.fx),edl:cleanData(c.edl),align:cleanData(c.align||null),wordAlignment:cleanData(c.wordAlignment||null),captionTimingStale:!!c.captionTimingStale,storyCues:cleanData(c.storyCues||null),cuesEdited:!!c.cuesEdited,fxEdited:!!c.fxEdited,narration:c.aud?{name:c.aud.name,size:c.aud.size,lastModified:c.aud.lastModified,sourceKey:c.aud.sourceKey,dur:c.aud.dur}:c.narration||null}))
   };
 }
 function restoreProject(data) {
@@ -3329,8 +3338,15 @@ function restoreProject(data) {
   clips=data.clips.map(saved=>{
     const existing=previous.get(saved.id);
     const matches=existing&&!existing.missing&&existing.file?.name===saved.name&&existing.file?.size===saved.size;
+    const narration=saved.narration;
+    // Keep decoded narration only when its persisted identity still matches. Legacy
+    // snapshots have no size/key, so they retain the old name-based behavior.
+    const audioMatches=!!(existing?.aud&&narration&&existing.aud.name===narration.name&&(
+      narration.sourceKey?existing.aud.sourceKey===narration.sourceKey:
+      narration.size==null||existing.aud.size===narration.size
+    ));
     if(existing&&!matches)releaseClip(existing);
-    return {...(matches?existing:{}),...structuredClone(saved),file:matches?existing.file:{name:saved.name,size:saved.size,type:saved.type},videoEl:matches?existing.videoEl:null,url:matches?existing.url:null,aud:existing?.aud?.name===saved.narration?.name?existing.aud:null,missing:!matches,status:matches?'Ready':'Relink video required',_analysis:matches?existing._analysis:null};
+    return {...(matches?existing:{}),...structuredClone(saved),file:matches?existing.file:{name:saved.name,size:saved.size,type:saved.type},videoEl:matches?existing.videoEl:null,url:matches?existing.url:null,aud:audioMatches?existing.aud:null,missing:!matches,status:matches?'Ready':'Relink video required',_analysis:matches?existing._analysis:null};
   });
   for(const [id,c] of previous)if(!clips.some(k=>k.id===id))releaseClip(c);
   for(const [id,value] of Object.entries(data.settings||{})){

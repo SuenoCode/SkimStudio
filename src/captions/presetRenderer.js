@@ -48,6 +48,7 @@ export function captionLayout(ctx,texts,{font,size=30,x=.5,y=.54,speaker=''}={})
  return {font,size:fs,widths,space,lines,box,speaker,label:{x:box.x+pad,y:box.y+pad+fs*.58}};
 }
 export function presetCaptionState(ctx,cue,time,options,words,config){
+ if(options.captionTimingStale)return null;
  // Positive legacy highlight offsets must never reveal a new preset before speech.
  const relative=time-cue.s+Math.min(0,options.wordOffset||0);
  if(!words?.length||!Number.isFinite(relative)||time<cue.s||time>=cue.e||!inActivity(options.speechRuns,time))return null;
