@@ -347,8 +347,10 @@ $('tm').onchange=()=>{
   const s=isStoryMode();
   $('edbox').style.display=s?'block':'none';
   $('chint').style.display=s?'block':'none';
-  $('stbox').style.display=$('tm').value==='story_multi'?'block':'none';
-  $('st_go').style.display=$('tm').value==='story_multi'?'inline-block':'none';
+  // Commentary always uses the story-building controls. The multi-clip mode
+  // only changes the available source pool; it is not a different build path.
+  $('stbox').style.display=s?'block':'none';
+  $('st_go').style.display=s?'inline-block':'none';
 };
 $('tm').dispatchEvent(new Event('change'));
 
@@ -3505,7 +3507,13 @@ function reviewedBuilder(builder){return async()=>{
  }catch(error){const message=(error&&error.message)||String(error);setStepState('fail','The edit could not be built: '+message);setStatus('Auto-Edit & Sync could not finish: '+message)}
  finally{buildBase=null}
 }}
-autoSyncAndEdit=reviewedBuilder(autoSyncAndEdit);buildStoryEdit=reviewedBuilder(buildStoryEdit);$('sy').onclick=autoSyncAndEdit;window.autoSyncAndEdit=autoSyncAndEdit;window.buildStoryEdit=buildStoryEdit;window.select=select;window.list=list;
+autoSyncAndEdit=reviewedBuilder(autoSyncAndEdit);
+buildStoryEdit=reviewedBuilder(buildStoryEdit);
+// Every commentary build goes through the story-aware planner so the main
+// action cannot silently fall back to appearance-only auto-editing. Keep the
+// legacy engine available for the standard/compatibility path and API users.
+$('sy').onclick=()=>isStoryMode()?buildStoryEdit():autoSyncAndEdit();
+window.autoSyncAndEdit=autoSyncAndEdit;window.buildStoryEdit=buildStoryEdit;window.select=select;window.list=list;
 // Explicit timeline tools retain the source model used by the original moment editor.
 const tools=document.createElement('div');tools.className='row';
 for(const [label,action] of [['Split at playhead','split'],['Move left','left'],['Move right','right'],['Delete shot','delete']]){
