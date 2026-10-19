@@ -141,6 +141,14 @@
         <div class="sec" id="stbox" style="display:none">
           <div class="sec-title"><span>Story Edit Engine</span><span style="color:var(--mu);font-size:10px">Narration is the master timeline</span></div>
           <div class="row">
+            <label>OpenRouter key <span style="color:var(--mu);font-size:10px">(memory only)</span></label>
+            <input class="in" id="m_story_key" type="password" autocomplete="off" placeholder="sk-or-v1-…" style="flex:1">
+          </div>
+          <div class="row">
+            <label>AI story model</label>
+            <input class="in" id="m_story_model" value="openrouter/free" spellcheck="false" style="flex:1">
+          </div>
+          <div class="row">
             <label>Source clips</label>
             <select id="st_src" style="flex:1">
               <option value="used">Only clips ticked in the bin</option>

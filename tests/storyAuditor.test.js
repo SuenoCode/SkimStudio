@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {AUDIT_RESPONSE_SCHEMA,auditMarkdown,localBeatPlan,normalizeAudit,normalizeBeats,scriptLines} from '../src/audit/storyAuditor.js';
+import {AUDIT_RESPONSE_SCHEMA,STORY_PLAN_SCHEMA,auditMarkdown,localBeatPlan,normalizeAudit,normalizeBeats,normalizeStoryPlan,scriptLines} from '../src/audit/storyAuditor.js';
 
 test('story script parsing produces six ordered beats before visual review',()=>{
  const script='Hook now. Context follows. Evidence appears. Payoff lands.';
@@ -24,4 +24,10 @@ test('audit output is safe to display and markdown includes evidence fields',()=
 test('audit response schema requires the contract fields',()=>{
  assert.deepEqual(AUDIT_RESPONSE_SCHEMA.required,['verdict','scores','reconstructedStory','segments','issues','solutionPlan','revisedTimeline','validationChecklist','limitations']);
  assert.deepEqual(AUDIT_RESPONSE_SCHEMA.properties.verdict.enum,['PASS','NEEDS_REVISION','FAIL']);
+});
+
+test('story planner keeps only real source shots and clamps section choices',()=>{
+ const plan=normalizeStoryPlan({shotPlan:[{sectionIndex:9,shotId:'shot-a',order:0,sourceStart:1,sourceEnd:2,speed:1.2,camera:'close',transition:'dissolve',rationale:'Payoff evidence'},{sectionIndex:0,shotId:'invented',order:1,sourceStart:0,sourceEnd:1,speed:1,camera:'wide',transition:'cut',rationale:'Should be removed'}],payoff:'The result lands.',validationChecklist:['Check the payoff.']},{duration:8,sectionCount:3,shots:[{id:'shot-a'}]});
+ assert.equal(plan.shotPlan.length,1);assert.equal(plan.shotPlan[0].sectionIndex,2);assert.equal(plan.shotPlan[0].shotId,'shot-a');assert.equal(plan.payoff,'The result lands.');
+ assert.deepEqual(STORY_PLAN_SCHEMA.required,['beats','shotPlan','payoff','validationChecklist']);
 });

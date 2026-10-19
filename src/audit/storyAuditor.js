@@ -30,6 +30,17 @@ const BEAT_SCHEMA={
  required:['beats']
 };
 
+export const STORY_PLAN_SCHEMA={
+ type:'object',additionalProperties:false,
+ properties:{
+  beats:BEAT_SCHEMA.properties.beats,
+  shotPlan:{type:'array',items:{type:'object',additionalProperties:false,properties:{sectionIndex:{type:'integer'},shotId:{type:'string'},order:{type:'integer'},sourceStart:{type:'number'},sourceEnd:{type:'number'},speed:{type:'number'},camera:{type:'string',enum:['wide','medium','close','drift','close_left','close_right']},transition:{type:'string',enum:['cut','dissolve','leak','burn']},rationale:{type:'string'}},required:['sectionIndex','shotId','order','sourceStart','sourceEnd','speed','camera','transition','rationale']}},
+  payoff:{type:'string'},
+  validationChecklist:{type:'array',items:{type:'string'}}
+ },
+ required:['beats','shotPlan','payoff','validationChecklist']
+};
+
 export function scriptLines(script){
  return String(script||'').replace(/\r/g,'\n').split(/\n+|(?<=[.!?])\s+/u).map(line=>line.trim()).filter(Boolean);
 }
@@ -53,6 +64,19 @@ export function normalizeBeats(value,script,duration){
   const end=Math.max(start,Math.min(Math.max(0,duration),Number.isFinite(Number(beat.end))?Number(beat.end):base.end));
   return{...base,...beat,id:text(beat.id)||base.id,label:text(beat.label)||base.label,expectedMeaning:text(beat.expectedMeaning)||base.expectedMeaning,subjects:asArray(beat.subjects).map(text).filter(Boolean),requiredEvidence:asArray(beat.requiredEvidence).map(text).filter(Boolean),start:+start.toFixed(3),end:+end.toFixed(3),importance:['low','medium','high'].includes(beat.importance)?beat.importance:base.importance};
  });
+}
+
+export function normalizeStoryPlan(value,{duration=0,sectionCount=1,shots=[]}={}){
+ const raw=value&&typeof value==='object'?value:{};
+ const ids=new Set(asArray(shots).map(shot=>text(shot.id)).filter(Boolean));
+ const maxSection=Math.max(0,sectionCount-1);
+ const plan=asArray(raw.shotPlan).map((item,index)=>{
+  const shotId=text(item?.shotId);if(!ids.has(shotId))return null;
+  const start=Number(item?.sourceStart),end=Number(item?.sourceEnd);
+  const section=Number.isFinite(Number(item?.sectionIndex))?Math.max(0,Math.min(maxSection,Math.round(Number(item.sectionIndex)))):0;
+  return{sectionIndex:section,shotId,order:Number.isFinite(Number(item?.order))?Math.max(0,Math.round(Number(item.order))):index,sourceStart:Number.isFinite(start)?start:0,sourceEnd:Number.isFinite(end)?end:start,speed:Number.isFinite(Number(item?.speed))?Number(item.speed):1,camera:['wide','medium','close','drift','close_left','close_right'].includes(item?.camera)?item.camera:'wide',transition:['cut','dissolve','leak','burn'].includes(item?.transition)?item.transition:'cut',rationale:text(item?.rationale)||'OpenRouter selected this shot for the narration beat.'};
+ }).filter(Boolean).sort((a,b)=>a.sectionIndex-b.sectionIndex||a.order-b.order);
+ return{beats:normalizeBeats(raw,'',duration),shotPlan:plan,payoff:text(raw.payoff),validationChecklist:asArray(raw.validationChecklist).map(text).filter(Boolean)};
 }
 
 function parseJson(value){
@@ -142,6 +166,26 @@ function auditPrompt(context){
  return `Audit the final rendered video against the narration plan. The frames are timestamped and come from the exported MP4, not the editor preview. Do not infer unseen frames. Distinguish verified mismatch, possible mismatch, and uncertainty caused by sparse sampling. Return JSON only matching the supplied schema. Confidence is a number from 0 to 1; scores are 0 to 100.\n\nNARRATION SCRIPT:\n${context.script}\n\nSCRIPT BEATS:\n${JSON.stringify(context.beats)}\n\nCAPTIONS WITH TIMING:\n${JSON.stringify(context.captions)}\n\nVOICE TRANSCRIPT WHEN AVAILABLE:\n${context.transcript||'Unavailable'}\n\nEXPORT:\n${JSON.stringify({duration:context.duration,resolution:context.resolution})}\n\nTIMELINE / EDL:\n${JSON.stringify(context.edl)}\n\nFor every issue include timestamp, severity, confidence, expectedMeaning, observedMeaning, evidence, rootCause, recommendedFix, and acceptanceCriteria. PASS requires no high-severity verified mismatch; NEEDS_REVISION is for fixable or uncertain concerns; FAIL is for a major verified story contradiction, missing payoff, or unusable captions.`;
 }
 
+function plannerPrompt(context){
+ return `You are the lead editor for a short-form commentary video. OpenRouter is the editorial mind: decide the intended story, pacing, shot order, source in/out points, camera emphasis, and transitions. Return JSON only matching the supplied schema.
+
+First divide the narration into the six beats Hook, Context, Development, Evidence or escalation, Payoff, and Closing statement or call-to-action. Then choose the best available source shots for each numbered timeline section. Use only exact shot IDs from SOURCE SHOTS; never invent an ID. Prefer visual evidence that supports the words, avoid repeating the same shot unless necessary, and make the final section deliver the payoff or closing promise. The browser will clamp unsafe source ranges and validate the final EDL.
+
+NARRATION SCRIPT:
+${context.script}
+
+TIMELINE SECTIONS:
+${JSON.stringify(context.sections)}
+
+SOURCE SHOTS:
+${JSON.stringify(context.shots)}
+
+REPRESENTATIVE FRAME ORDER:
+${JSON.stringify(asArray(context.shotFrames).map(frame=>({id:frame.id,timestamp:frame.timestamp})))}
+
+For every shotPlan item, sectionIndex must refer to TIMELINE SECTIONS, order is editorial order within that section, sourceStart/sourceEnd are source-video seconds, speed must be between 0.25 and 2.5, and rationale must explain the match. Use the supplied representative frame images when present, but do not claim certainty beyond the evidence.`;
+}
+
 export function normalizeAudit(value,context){
  const raw=value&&typeof value==='object'?value:{};
  const scores=raw.scores||{};
@@ -160,6 +204,18 @@ export async function runStoryAudit({apiKey,model=DEFAULT_AUDIT_MODEL,script,cap
  const content=[{type:'text',text:auditPrompt(context)},...frames.map(frame=>({type:'image_url',image_url:{url:frame.dataUrl,detail:'low'}}))];
  const result=await completeJson({apiKey,model,messages:[{role:'system',content:'You are a rigorous multimodal video auditor. Return only valid JSON.'},{role:'user',content}],responseFormat:{type:'json_schema',json_schema:{name:'skimstudio_story_audit',strict:true,schema:AUDIT_RESPONSE_SCHEMA}},maxTokens:4200,signal});
  onProgress(1,'Story audit complete.');return normalizeAudit(result,context);
+}
+
+export async function runStoryPlanner({apiKey,model=DEFAULT_AUDIT_MODEL,script,duration=0,sections=[],shots=[],shotFrames=[],onProgress=()=>{},signal}={}){
+ if(!text(apiKey))throw new Error('Enter an OpenRouter API key to build the commentary story.');
+ if(!text(script))throw new Error('Add a narration script before building the commentary story.');
+ if(!shots.length)throw new Error('No analyzed source shots are available for the story planner.');
+ const context={script,duration,sections,shots,shotFrames,model};
+ const content=[{type:'text',text:plannerPrompt(context)},...asArray(shotFrames).map(frame=>({type:'image_url',image_url:{url:frame.dataUrl,detail:'low'}}))];
+ const result=await completeJson({apiKey,model,messages:[{role:'system',content:'You are the lead video editor. Return only valid JSON.'},{role:'user',content}],responseFormat:{type:'json_schema',json_schema:{name:'skimstudio_story_plan',strict:true,schema:STORY_PLAN_SCHEMA}},maxTokens:4200,signal});
+ const plan=normalizeStoryPlan(result,{duration,sectionCount:sections.length,shots});
+ onProgress(1,`OpenRouter planned ${plan.shotPlan.length} source shots.`);
+ return plan;
 }
 
 export function auditMarkdown(audit){

@@ -27,7 +27,7 @@ import {History} from './core/history.js';
 import {storeProject,loadProject} from './storage/indexedDb.js';
 import {easeInOutCubic,transitionSourceTime,transitionDuration} from './core/transitions.js';
 import {installSimpleEditor} from './ui/simple-editor.js';
-import {DEFAULT_AUDIT_MODEL,listFreeVisionModels,sampleExportFrames,runStoryAudit,auditMarkdown} from './audit/storyAuditor.js';
+import {DEFAULT_AUDIT_MODEL,listFreeVisionModels,sampleExportFrames,runStoryAudit,runStoryPlanner,auditMarkdown} from './audit/storyAuditor.js';
 
 const $=id=>document.getElementById(id);
 let W=720,H=1280;
@@ -75,7 +75,7 @@ function renderStoryAudit(audit){
 function installStoryAuditor(){
  const open=$('story_audit_open'),dialog=$('story_audit_dialog');if(!open||!dialog)return;
  const run=$('story_audit_run'),key=$('m_audit_key'),model=$('m_audit_model'),count=$('m_audit_count');
- open.onclick=()=>{const ready=!!lastExportBlob&&!!lastExportAuditSource;run.disabled=!ready;$('story_audit_export').textContent=ready?`Last export: ${lastExportAuditSource.name||'MP4'} • ${lastExportAuditSource.resolution.width}×${lastExportAuditSource.resolution.height} • ${lastExportAuditSource.duration.toFixed(2)}s`:'Export a video in this browser session before starting an audit.';auditStatus(ready?'Ready to sample the final exported MP4.':'The panel is available now, but Audit final export unlocks after a successful export.');dialog.showModal()};
+ open.onclick=()=>{if(!key.value.trim()&&$('m_story_key')?.value)key.value=$('m_story_key').value;if(model.value===DEFAULT_AUDIT_MODEL&&$('m_story_model')?.value)model.value=$('m_story_model').value;const ready=!!lastExportBlob&&!!lastExportAuditSource;run.disabled=!ready;$('story_audit_export').textContent=ready?`Last export: ${lastExportAuditSource.name||'MP4'} • ${lastExportAuditSource.resolution.width}×${lastExportAuditSource.resolution.height} • ${lastExportAuditSource.duration.toFixed(2)}s`:'Export a video in this browser session before starting an audit.';auditStatus(ready?'Ready to sample the final exported MP4.':'The panel is available now, but Audit final export unlocks after a successful export.');dialog.showModal()};
  $('story_audit_close').onclick=()=>dialog.close();
  $('story_audit_models').onclick=async()=>{if(!key.value.trim()||auditBusy){auditStatus('Enter an OpenRouter API key before loading models.');return}auditBusy=true;auditStatus('Loading free vision-capable models…');try{const models=await listFreeVisionModels(key.value.trim());const list=$('m_audit_models');list.replaceChildren(...models.map(item=>{const option=document.createElement('option');option.value=item.id;option.label=`${item.name}${item.contextLength?' • '+item.contextLength+' ctx':''}`;return option}));auditStatus(`Loaded ${models.length} free vision-capable models. The default route remains available if the list is empty.`)}catch(error){auditStatus(error.message)}finally{auditBusy=false}};
  run.onclick=async()=>{
@@ -2844,7 +2844,7 @@ function shotPool(pool){
         const a=sceneStart+len*(p/parts),b=sceneStart+len*((p+1)/parts);
         const mine=((ana&&ana.events)||[]).filter(e=>e.t>=a&&e.t<=b);
         const dead=((ana&&ana.dead)||[]).filter(d=>d.s<b&&d.e>a);
-        shots.push({ci,si:s.idx!=null?s.idx:0,p,s:a,e:b,len:b-a,
+        shots.push({id:`clip-${ci}-shot-${s.idx!=null?s.idx:0}-part-${p}`,ci,si:s.idx!=null?s.idx:0,p,s:a,e:b,len:b-a,
           motion:s.motion||0,action:s.action||0,steady:s.steady||0,
           edge:s.edge||0,bright:s.bright==null?.5:s.bright,
           events:mine,dead,ev:clipEvidence(c),ana:ana});
@@ -2852,6 +2852,24 @@ function shotPool(pool){
     });
   });
   return shots;
+}
+
+async function sampleStoryPlannerFrames(shots,onProgress=()=>{}){
+  const stride=Math.max(1,Math.ceil(shots.length/16));
+  const selected=shots.filter((_,index)=>index%stride===0).slice(0,16);
+  const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d'),frames=[];
+  for(let index=0;index<selected.length;index++){
+    const shot=selected[index],video=clips[shot.ci]?.videoEl;
+    if(!video)continue;
+    await seekFrame(video,(shot.s+shot.e)/2,()=>exportCancelled&&busy);
+    const scale=Math.min(1,384/Math.max(1,video.videoWidth));
+    canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
+    canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    frames.push({id:shot.id,timestamp:+((shot.s+shot.e)/2).toFixed(3),dataUrl:canvas.toDataURL('image/jpeg',.72)});
+    onProgress((index+1)/selected.length,shot);
+  }
+  return frames;
 }
 
 // ---- Relevance scoring, driven by what the footage actually contains ----
@@ -2928,6 +2946,23 @@ async function buildStoryEdit(){
       setStepState('fail','The selected clips contain no usable footage (nothing longer than 0.6s was found). Import longer clips and build again.');
       setStatus('No usable footage found in the selected clips.');return}
 
+    // OpenRouter is the editorial brain when a key is supplied. The local
+    // planner below remains the safety layer that clamps source ranges and
+    // validates the returned edit before it reaches the timeline.
+    const aiKey=(($('m_story_key')?.value||$('m_audit_key')?.value)||'').trim();
+    const aiModel=(($('m_story_model')?.value||$('m_audit_model')?.value)||DEFAULT_AUDIT_MODEL).trim()||DEFAULT_AUDIT_MODEL;
+    let aiPlan=null;
+    if(aiKey){
+      say('Sampling representative source frames for OpenRouter…');
+      const plannerFrames=await sampleStoryPlannerFrames(poolShots,(fraction)=>updateTaskProgress(72+fraction*8,`Preparing source frames ${Math.round(fraction*100)}%…`,'OpenRouter story planning'));
+      say('Asking OpenRouter to plan the story outcome…');
+      aiPlan=await runStoryPlanner({apiKey:aiKey,model:aiModel,script:$('sc').value.trim(),duration:total,sections:S.secs.map((sec,index)=>({index,start:sec.start,end:sec.end,role:sec.role,text:sec.lines.map(lineIndex=>lines[lineIndex]).join(' '),keywords:sec.keys})),shots:poolShots.map(sh=>({id:sh.id,clipIdx:sh.ci,sourceStart:+sh.s.toFixed(3),sourceEnd:+sh.e.toFixed(3),duration:+sh.len.toFixed(3),motion:+sh.motion.toFixed(2),action:+sh.action.toFixed(2),steady:+sh.steady.toFixed(2),brightness:+sh.bright.toFixed(2),keywords:[...sh.ev.words].slice(0,16),eventTimes:(sh.events||[]).map(event=>+event.t.toFixed(2))})),shotFrames:plannerFrames,onProgress:(_,message)=>say(message)});
+      say(`OpenRouter planned ${aiPlan.shotPlan.length} source shots; validating the edit…`);
+    }else{
+      say('OpenRouter key not provided; using the local safety planner. Add a key above to let OpenRouter choose the story outcome.');
+    }
+    const aiChoicesForSection=sectionIndex=>(aiPlan?.shotPlan||[]).filter(item=>item.sectionIndex===sectionIndex).sort((a,b)=>a.order-b.order);
+
     const ctx={used:[],prevClip:pool[0].i,variety:varietyPenalty,wantEstablish:true,neutralPenalty:1.1};
     const edl=[];
     let tCursor=0;
@@ -2938,7 +2973,8 @@ async function buildStoryEdit(){
       const sec=S.secs[si];
       ctx.wantEstablish=(sec.role==='open');
       const secLen=sec.end-sec.start;
-      const nShots=Math.max(1,Math.round(secLen/((loLen+hiLen)/2)));
+      const aiCount=aiChoicesForSection(si).length;
+      const nShots=Math.max(1,Math.min(5,aiCount||Math.round(secLen/((loLen+hiLen)/2))));
       const shotLen=secLen/nShots;
 
       for(let k=0;k<nShots;k++){
@@ -2948,6 +2984,8 @@ async function buildStoryEdit(){
           if(sh.len<0.5||ctx.used.some(u=>u.ci===sh.ci&&u.si===sh.si&&u.p===sh.p))continue;
           const infoS=scoreShot(sh,sec,ctx);
           let s=infoS.score;
+          const aiRank=aiChoicesForSection(si).findIndex(item=>item.shotId===sh.id);
+          if(aiRank>=0)s+=1000-aiRank*10;
           const stretch=Math.min(1.35,sh.len/shotLen);     // slow-mo only if the source is short
           if(stretch<0.55)s-=1.6;
           else if(Math.abs(sh.len-shotLen)<1.2)s+=0.7;     // natural length
@@ -2957,19 +2995,21 @@ async function buildStoryEdit(){
         if(!best)throw new Error('Insufficient unused footage. Import additional clips or shorten the narration.');
 
         const sh=best.shot;
+        const aiChoice=aiChoicesForSection(si).find(item=>item.shotId===sh.id)||null;
         // Where inside that shot we take the footage: the analyser tells us which part
         // actually contains action and which part is dead time. We cut to the action.
         const ana=sh.ana||null;
         const wantSrc=Math.min(sh.len,Math.max(0.6,shotLen));
-        const range=(ana&&ana.ok)?bestRangeInShot({s:sh.s,e:sh.e,idx:sh.si},ana,wantSrc):{s:sh.s,e:sh.s+wantSrc};
+        const aiStart=Number(aiChoice?.sourceStart),aiEnd=Number(aiChoice?.sourceEnd);
+        const aiRange=Number.isFinite(aiStart)&&Number.isFinite(aiEnd)&&aiEnd>aiStart
+          ?{s:Math.max(sh.s,Math.min(sh.e,aiStart)),e:Math.max(sh.s,Math.min(sh.e,aiEnd))}:null;
+        const range=aiRange&&aiRange.e-aiRange.s>=0.6?aiRange:((ana&&ana.ok)?bestRangeInShot({s:sh.s,e:sh.e,idx:sh.si},ana,wantSrc):{s:sh.s,e:sh.s+wantSrc});
         const avail=+(range.e-range.s).toFixed(2);
         // Footage adapts to the narration: trim or gently slow to fill the beat
-        let useLen=Math.min(avail,shotLen);
-        let sp=1;
-        if(avail<shotLen){
-          sp=Math.max(.25,avail/shotLen);              // never more than 1.35x slow
-          useLen=shotLen*sp;
-        }
+        const requestedSpeed=Number.isFinite(Number(aiChoice?.speed))?Math.max(.25,Math.min(2.5,Number(aiChoice.speed))):1;
+        let sp=Math.min(requestedSpeed,Math.max(.25,Math.min(2.5,avail/Math.max(.1,shotLen))));
+        if(avail<shotLen)sp=Math.max(.25,avail/shotLen);
+        const useLen=Math.min(avail,shotLen*sp);
         const sourceDuration=clips[sh.ci].videoEl.duration;
         const rawStart=Math.max(0,Math.min(sourceDuration,Number(range.s)||0));
         const rawEnd=Math.max(rawStart,Math.min(sourceDuration,Number(range.e)||rawStart,rawStart+useLen));
@@ -2998,7 +3038,15 @@ async function buildStoryEdit(){
       else if(wantLeak&&edl.length%2===0){tr={type:'leak',d:0.3};lastLeak=tCursor;lastStylized=tCursor}
     }
 
-        const camPick=pickStoryCamera(sec.role,sh,k===0);
+        const camPick=aiChoice?.camera?pickStoryCamera(aiChoice.camera==='close'?'climax':aiChoice.camera==='medium'?'develop':sec.role,sh,k===0):pickStoryCamera(sec.role,sh,k===0);
+        const aiTransition=aiChoice?.transition;
+        if(edl.length&&aiTransition&&trStyle!=='cut'){
+          if(aiTransition==='dissolve'&&trStyle==='cine')tr={type:'dissolve',d:transitionDuration(.34,shotLen)};
+          else if(aiTransition==='leak'&&wantLeak)tr={type:'leak',d:.3};
+          else if(aiTransition==='burn'&&wantBurn)tr={type:'burn',d:.3};
+        }
+        const why=(aiChoice?'OpenRouter: '+aiChoice.rationale:(bestInfo&&bestInfo.hit?'keyword match: '+(sec.keys.filter(w=>sh.ev.words.has(w)).join(', ')):'neutral contextual footage'))+
+          (onAction?' • action detected':(ana&&ana.ok?' • held shot, no action detected':''));
         edl.push({
           s:sPos,
           e:ePos,
@@ -3014,8 +3062,7 @@ async function buildStoryEdit(){
           t:'',
           sfx:'',
           tr:tr,
-          why:((bestInfo&&bestInfo.hit?('keyword match: '+(sec.keys.filter(w=>sh.ev.words.has(w)).join(', '))):'neutral contextual footage')+
-             (onAction?' • action detected':(ana&&ana.ok?' • held shot, no action detected':''))),
+          why,
           score:+best.score.toFixed(2),
           sec:sec.role,
           secI:si,
