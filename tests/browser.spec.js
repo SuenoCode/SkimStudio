@@ -8,6 +8,7 @@ async function openAdvancedTools(page){
  if(!(await details.evaluate(element=>element.open)))await details.locator('summary').click();
  await page.locator('#tm').selectOption('story');
  await page.locator('#tm').dispatchEvent('change');
+ await page.locator('#st_ai_mode').selectOption('offline');
 }
 test('media import, reviewed build, persistence, captions and MP4 export',async({page})=>{
  test.setTimeout(120000);const errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
@@ -98,6 +99,8 @@ test('auto-edit reaches the review plan when optional speech recognition cannot 
   test.setTimeout(90000);const errors=[];page.on('pageerror',error=>errors.push(error.message));await page.goto('/');await openAdvancedTools(page);
   await expect(page.locator('#caption_engine')).toHaveValue('speech');
   await page.locator('#file').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list')).toContainText('source.mp4');
+  // The 8s narration needs two independent candidates in the current story planner.
+  await page.locator('#file').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list .item')).toHaveCount(2);
   await page.locator('#sc').fill('The first moment begins. Then the story continues. It ends here now.');await page.locator('#mp3').setInputFiles('tests/fixtures/narration.wav');await expect(page.locator('#ai')).toContainText('narration.wav');
   await page.evaluate(()=>{window.studioConfirm=async()=>false});await page.locator('#sy').click();
   await expect(page.locator('#plan_dialog')).toBeVisible({timeout:60000});await expect(page.locator('#plan_rows tr').first()).toBeVisible();
@@ -115,6 +118,7 @@ test('auto-edit reaches the review plan when optional speech recognition cannot 
 test('auto-edit captions always validate, so preview and export are never blocked',async({page})=>{
   test.setTimeout(90000);const errors=[];page.on('pageerror',error=>errors.push(error.message));await page.goto('/');await openAdvancedTools(page);await page.locator('#caption_engine').selectOption('estimated');
   await page.locator('#file').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list')).toContainText('source.mp4');
+  await page.locator('#file').setInputFiles('tests/fixtures/source.mp4');await expect(page.locator('#list .item')).toHaveCount(2);
   // Irregular speech bursts produce cue bounds that need rounding.
   const sr=16000,frames=sr*9,buffer=Buffer.alloc(44+frames*2);buffer.write('RIFF');buffer.writeUInt32LE(buffer.length-8,4);buffer.write('WAVEfmt ',8);buffer.writeUInt16LE(16,16);buffer.writeUInt16LE(1,20);buffer.writeUInt16LE(1,22);buffer.writeUInt32LE(sr,24);buffer.writeUInt32LE(sr*2,28);buffer.writeUInt16LE(2,32);buffer.writeUInt16LE(16,34);buffer.write('data',36);buffer.writeUInt32LE(frames*2,40);
   for(let i=0;i<frames;i++){const t=i/sr;const on=[.13,1.07,1.61,2.44,3.02,4.11,4.57,5.73,6.19,7.44,8.11].some(s=>t>=s&&t<s+.19+.07*(i%5));

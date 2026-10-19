@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {AUDIT_RESPONSE_SCHEMA,STORY_PLAN_SCHEMA,auditMarkdown,localBeatPlan,normalizeAudit,normalizeBeats,normalizeStoryPlan,scriptLines} from '../src/audit/storyAuditor.js';
+import {AUDIT_RESPONSE_SCHEMA,STORY_PLAN_SCHEMA,auditMarkdown,localBeatPlan,normalizeAudit,normalizeBeats,normalizeStoryPlan,runStoryAudit,scriptLines} from '../src/audit/storyAuditor.js';
+import {plan,audit,beats,metadata} from './fixtures/ai.js';
 
 test('story script parsing produces six ordered beats before visual review',()=>{
  const script='Hook now. Context follows. Evidence appears. Payoff lands.';
@@ -26,8 +27,22 @@ test('audit response schema requires the contract fields',()=>{
  assert.deepEqual(AUDIT_RESPONSE_SCHEMA.properties.verdict.enum,['PASS','NEEDS_REVISION','FAIL']);
 });
 
-test('story planner keeps only real source shots and clamps section choices',()=>{
- const plan=normalizeStoryPlan({shotPlan:[{sectionIndex:9,shotId:'shot-a',order:0,sourceStart:1,sourceEnd:2,speed:1.2,camera:'close',transition:'dissolve',rationale:'Payoff evidence'},{sectionIndex:0,shotId:'invented',order:1,sourceStart:0,sourceEnd:1,speed:1,camera:'wide',transition:'cut',rationale:'Should be removed'}],payoff:'The result lands.',validationChecklist:['Check the payoff.']},{duration:8,sectionCount:3,shots:[{id:'shot-a'}]});
- assert.equal(plan.shotPlan.length,1);assert.equal(plan.shotPlan[0].sectionIndex,2);assert.equal(plan.shotPlan[0].shotId,'shot-a');assert.equal(plan.payoff,'The result lands.');
+test('story planner rejects invalid references, intervals, enums, sections and incomplete plans atomically',()=>{
+ const context={duration:1,sectionCount:1,shots:[{id:'shot-a',sourceStart:0,sourceEnd:1}]};
+ assert.deepEqual(normalizeStoryPlan(plan(),context),plan());
+ for(const patch of [{shotId:'invented'},{sectionIndex:9},{sourceStart:-1},{sourceEnd:2},{sourceEnd:0},{camera:'invented'},{transition:'invented'},{speed:'1'},{order:1}]){
+  const input=plan();Object.assign(input.shotPlan[0],patch);const before=structuredClone(input);
+  assert.throws(()=>normalizeStoryPlan(input,context),error=>error.code==='INVALID_MODEL_OUTPUT');assert.deepEqual(input,before);
+ }
+ const empty=plan();empty.shotPlan=[];assert.throws(()=>normalizeStoryPlan(empty,context));
+ assert.throws(()=>normalizeStoryPlan(plan(),{...context,sectionCount:2}));
  assert.deepEqual(STORY_PLAN_SCHEMA.required,['beats','shotPlan','payoff','validationChecklist']);
+});
+
+test('schema-valid but inconsistent audit PASS requires revision and retains actual provider metadata',async()=>{
+ const data=audit();data.issues=[{timestamp:.5,severity:'high',confidence:.9,expectedMeaning:'Result',observedMeaning:'Unrelated shot',evidence:['frame-1'],rootCause:'Shot choice',recommendedFix:'Review source',acceptanceCriteria:'Result shown'}];
+ let request;
+ const result=await runStoryAudit({script:'A result.',duration:1,beatResult:{...beats(1),metadata:metadata()},frames:[{id:'frame-1',timestamp:.5,dataUrl:'test-only'}],provider:{async completeJSON(options){request=options;return {data,metadata:metadata()};}}});
+ assert.equal(result.verdict,'NEEDS_REVISION');assert.equal(result.model,'test/vision:free');assert.equal(result.requestMetadata.length,2);
+ assert.equal(JSON.parse(request.messages.at(-1).content[1].text).sourceTimestampSeconds,.5);
 });

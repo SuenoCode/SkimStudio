@@ -9,4 +9,6 @@ coverage/
 /analysis/
 .env
 .env.*
-!.env.example
+!.env.local
+# Provider credentials must remain local even with customized env exceptions.
+.env.local

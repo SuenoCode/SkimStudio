@@ -141,13 +141,14 @@
         <div class="sec" id="stbox" style="display:none">
           <div class="sec-title"><span>Story Edit Engine</span><span style="color:var(--mu);font-size:10px">Narration is the master timeline</span></div>
           <div class="row">
-            <label>OpenRouter key <span style="color:var(--mu);font-size:10px">(memory only)</span></label>
-            <input class="in" id="m_story_key" type="password" autocomplete="off" placeholder="sk-or-v1-…" style="flex:1">
+            <label for="st_ai_mode">Story planner</label>
+            <select id="st_ai_mode" style="flex:1"><option value="openrouter" selected>OpenRouter AI</option><option value="offline">Offline planner (heuristic)</option></select>
           </div>
           <div class="row">
             <label>AI story model</label>
-            <input class="in" id="m_story_model" value="openrouter/free" spellcheck="false" style="flex:1">
+            <input class="in" id="m_story_model" placeholder="Server default (openrouter/free)" spellcheck="false" style="flex:1">
           </div>
+          <p class="reference-note">AI uses the local server's OpenRouter configuration. Selected frames and narration are sent to the model provider. Only confirmed free models are allowed.</p>
           <div class="row">
             <label>Source clips</label>
             <select id="st_src" style="flex:1">
@@ -665,12 +666,11 @@
 <p>Download first, then pick the file on the platform's upload page. Platforms only accept uploads from their own sites or approved apps.</p>
 <button class="b" onclick="closeShareDialog()">Close</button></div></div></div>
 <dialog id="story_audit_dialog" class="story-audit-dialog" aria-labelledby="story_audit_title">
-  <div class="story-audit-header"><div><div class="audit-kicker">SKIMSTUDIO / AI REVIEW</div><h2 id="story_audit_title">AI Story Auditor</h2><p>Audits the actual exported MP4 against the script. Your API key stays in this page memory and is never saved in project data.</p></div><button class="g sm" id="story_audit_close">Close</button></div>
+  <div class="story-audit-header"><div><div class="audit-kicker">SKIMSTUDIO / AI REVIEW</div><h2 id="story_audit_title">AI Story Auditor</h2><p>Audits sampled frames of the final MP4 against your script. OpenRouter credentials are configured on the local server.</p></div><button class="g sm" id="story_audit_close">Close</button></div>
   <div class="story-audit-controls">
-    <label>OpenRouter API key<input id="m_audit_key" type="password" autocomplete="off" placeholder="sk-or-v1-…"></label>
-    <label>Model<input id="m_audit_model" list="m_audit_models" value="openrouter/free" spellcheck="false"><datalist id="m_audit_models"><option value="openrouter/free">Free model router</option></datalist></label>
-    <label>Frame samples<input id="m_audit_count" type="number" min="6" max="32" step="1" value="12"></label>
-    <div class="story-audit-actions"><button class="g sm" id="story_audit_models">Load free models</button><button id="story_audit_run" disabled>Audit final export</button></div>
+    <label>Model<input id="m_audit_model" list="m_audit_models" placeholder="Server default (openrouter/free)" spellcheck="false"><datalist id="m_audit_models"><option value="openrouter/free">Free model router</option></datalist></label>
+    <label>Frame samples<input id="m_audit_count" type="number" min="3" max="12" step="1" value="12"></label>
+    <div class="story-audit-actions"><button class="g sm" id="story_audit_models">Load free models</button><button id="story_audit_run" disabled>Audit final export</button><button class="g sm" id="story_audit_cancel" hidden>Cancel audit</button></div>
   </div>
   <p id="story_audit_export" class="story-audit-export">Export a video before starting an audit.</p>
   <div id="story_audit_status" class="story-audit-status" role="status" aria-live="polite">Waiting for an exported video.</div>

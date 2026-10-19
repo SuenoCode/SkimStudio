@@ -9,7 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
     "test:browser": "playwright test",
-    "test:speech": "playwright test -c playwright.speech.config.js"
+    "test:speech": "playwright test -c playwright.speech.config.js",
+    "test:ai:live": "node scripts/verify-openrouter.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
@@ -20,7 +21,8 @@
   },
   "dependencies": {
     "@fontsource/montserrat": "^5.3.0",
-    "@huggingface/transformers": "^4.3.1"
+    "@huggingface/transformers": "^4.3.1",
+    "ajv": "^8.17.1"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,

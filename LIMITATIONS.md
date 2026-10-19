@@ -6,6 +6,10 @@ The three new editing presets and their specific fallback behavior are documente
 
 ## Editing intelligence and captions
 
+- OpenRouter transport now uses a local same-origin server with an environment-only credential, capability/free-pricing checks, runtime JSON Schema validation, request budgets, timeout/cancellation and bounded retries. Static Vercel hosting does not provide this endpoint. Missing credentials and invalid model responses do not automatically switch to heuristic editing; select Offline planner explicitly.
+- The planner rejects empty/partial plans, unknown shot IDs, invalid intervals/enums and duplicate candidate use. Repeated use is currently unsupported rather than silently changed. It still uses heuristic narration sections and equal-duration slots; a full AI decision compiler, durable evidence provenance and exact camera/transition execution are pending M2–M6. Sparse midpoint images do not prove actions or outcomes.
+- Final-export audit now extracts beats before sampling and labels each sampled image with a timestamp/ID. It uses 3–12 frames with a 512px long-edge cap, so it cannot inspect every cut, caption or action. Live provider quality has not been established by deterministic test responses. Reports and pending plans still live only for the current session.
+
 - Footage analysis uses sampled luminance histograms, pixel changes, edge detail, and exposure estimates. It does not recognize subjects, goals, wins, chronology, or narrative meaning. Filename/manual-note keyword matches are metadata evidence only. Unmatched selections are explicitly marked for manual review.
 - Generated narrative roles are editable script/pacing heuristics. Subject consistency and story continuity require editorial review. The story generator rejects exhausted candidate footage instead of silently repeating it; this can reject a plan that a human could improve by reusing a different subrange.
 - Speech-energy and Whisper output are estimates, not verified word alignment. No speech-ground-truth accuracy claim has been tested. Imported timing accuracy is the user's responsibility; interval/text validation cannot verify what was spoken.

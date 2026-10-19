@@ -20,6 +20,10 @@ npm run build
 npm run preview
 ```
 
+For OpenRouter, copy [.env.example](.env.example) to `.env.local`, set `OPENROUTER_API_KEY`, optionally set `OPENROUTER_MODEL` to a confirmed free model, and restart `npm run dev` (or local `npm run preview`). Use **OpenRouter AI** in Story Edit Engine. The key is read only by the local Node server and never sent to the browser or saved in projects. Use the ordinary variable name, never `VITE_OPENROUTER_API_KEY`. Local AI endpoints accept same-origin loopback requests only; do not expose the Vite server on your network.
+
+`npm run test:ai:live` performs a genuine structured OpenRouter request using the server environment and prints model/usage metadata. Missing credentials or provider failure returns a nonzero result. Automated contract/browser tests use explicitly labeled test responses and do not establish live model quality.
+
 Browser tests use an installed Google Chrome through Playwright. To use Edge, change `channel: 'chrome'` to `channel: 'msedge'` in `playwright.config.js`. Node tests do not need a browser. Test media is included in `tests/fixtures`; it is synthetic color-pattern footage and tones, not spoken-language ground truth.
 
 ## Editing workflow
@@ -29,7 +33,7 @@ The default **Reference Story** look is adapted from the supplied YouTube Short:
 1. Import videos into the media bin. Each file is checked using actual browser decoding. Importing media does not generate an edit. The bin shows dimensions, duration, and a thumbnail.
 2. Enter your narration script and import narration audio. Import prepares activity intervals and a waveform only. **Sync captions to speech** runs local word recognition after explicit download consent. Recognized-word timing is the default; approximate audio estimation and manual/imported timing are explicit alternatives.
 3. Select **Analyze media** to sample footage and detect probable scene boundaries and motion changes. Add clip notes in the multiple-clips story panel to supply context. Analysis does not identify people, actions, or outcomes.
-4. In commentary mode, enter an OpenRouter key in **Story Edit Engine** and use **Build AI Story & Sync**. OpenRouter receives the narration, timeline sections, analyzed shot inventory, and representative source frames; it chooses the story beats, shot order, source ranges, pacing, camera emphasis, and transitions. SkimStudio then clamps the returned ranges and validates the EDL before showing the reviewed plan. If no key is supplied, the local safety planner remains available as an explicit fallback. Review the plan and apply it only after confirmation. Local speech recognition is still optional: if you decline the model download, the model host is unreachable, or the device cannot run recognition, the plan can fall back to audio-estimated caption timing. Your existing caption times are never overwritten by a failed attempt.
+4. In commentary mode, select **OpenRouter AI** or **Offline planner (heuristic)** in Story Edit Engine. AI mode sends narration, settings, source inventory and up to 12 representative images through the configured local server. Responses must match the schema and reference real candidate shots, valid intervals and every narration section. Invalid AI output stops with an error and retains the current timeline. Offline planning requires selecting that mode explicitly. The intermediate editor still fits selections into local timing slots; complete evidence-grounded timeline compilation is a later milestone. Review and apply the resulting plan. Optional speech-recognition failure can separately use clearly labeled estimated caption timing.
 5. Select **Apply reviewed plan** to commit it. Replacing a timeline requires confirmation and can be undone. A locked shot's source, duration, speed, framing, and absolute position cannot silently change.
 6. Preview the timeline. Full and selected-moment previews use the export audio mixer and frame compositor. Preview is a best-effort real-time view; slow devices can skip visual updates while the audio clock continues.
 7. Select shots to trim, change speed or framing, and set transitions in the moment editor. Split at the playhead, reorder, or delete with the timeline tools. Structural changes ripple picture positions; narration captions retain their timestamps. Unlock shots before structural changes that could move them.
@@ -42,9 +46,9 @@ Export checks container signature, duration, and decoding at the first, middle, 
 
 The commentary builder and the auditor are separate OpenRouter workflows. The builder is the forward-planning step: it decides what the video should communicate before the EDL is committed. The auditor is the backward verification step: after export, it checks whether the rendered MP4 actually communicates that plan.
 
-After a successful export, open **AI Story Auditor** in the advanced tools. The auditor samples the final MP4 at beat boundaries, cuts, caption changes, motion-sensitive pacing points, and beginning/middle/end coverage. It first extracts six script beats, then sends the timestamped frames and timeline context to OpenRouter for a structured `PASS`, `NEEDS_REVISION`, or `FAIL` report with scores, evidence, issues, limitations, and recommended fixes. The default model is OpenRouter's free router; **Load free models** can discover currently available free vision-capable models.
+After a successful export, open **AI Story Auditor** in the advanced tools. It checks local-server configuration, extracts script beats, then samples the actual MP4 with beginning/middle/end coverage and prioritizes cuts, beat boundaries and caption changes within the selected 3–12 frame budget. It does not analyze motion in the rendered output. Each image is paired with an evidence ID and timestamp. The structured report contains `PASS`, `NEEDS_REVISION` or `FAIL`, scores, issues and limitations; **Download Markdown report** saves it. Cancel stops sampling/inference and releases the controls.
 
-The API key is held only in page memory. It is intentionally prefixed with an in-memory-only control and is excluded from project autosaves and exported project JSON. The auditor is advisory: it never changes the timeline automatically, and sparse frame sampling or model uncertainty can produce incomplete evidence. OpenRouter's browser request uses its documented chat-completions multimodal image parts and free router/model catalog. See the [OpenRouter chat-completions documentation](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request?explorer=true) and [model catalog documentation](https://openrouter.ai/docs/api/api-reference/models/get-models).
+The provider enforces known zero pricing and image capability, validates responses, limits request/image/token sizes, serializes requests, handles short rate-limit retries, and records requested/actual models and usage. Long reset times return an error with a retry time rather than holding the request indefinitely. AI mode never switches to a paid model or offline edit automatically. Credentials stay server-side. Reports remain advisory and frame coverage is sparse; listen to the final audio. See the [OpenRouter free-router documentation](https://openrouter.ai/docs/guides/routing/routers/free-router) and [rate-limit documentation](https://openrouter.ai/docs/api_reference/limits).
 
 ## Captions and timing
 
@@ -77,7 +81,7 @@ Undo/redo covers editor snapshots within the active session. Resetting or loadin
 1. Extract the ZIP and place its source files in a Git repository.
 2. Import that repository into Vercel and choose its project root.
 3. Use the **Vite** preset, install command `npm install` (or `npm ci`), build command `npm run build`, and output directory `dist`.
-4. Deploy. No environment variables, server functions, database, or persistent Node process are required.
+4. Deploy the static editor. Offline editing/browser export do not require server infrastructure. OpenRouter AI is currently available only with the local Node/Vite gateway; a static Vercel deployment cannot run that gateway. Setting an OpenRouter secret in a static build does not create an API endpoint. Hosted authenticated AI transport is deferred to the roadmap; do not expose a shared key in client configuration.
 
 The included `vercel.json` supplies the build/output settings. The ZIP also includes the verified `dist/` build for static hosting. Both `/` and `/SkimStudio_Enhanced.html` are built. Uploaded media remains on the user's device. Optional fonts and the explicitly requested Whisper runtime/model use external networks.
 
@@ -91,6 +95,8 @@ The included `vercel.json` supplies the build/output settings. The ZIP also incl
 - `src/captions/`: reference phrase layout, editorial emphasis, animation and preset controls. Montserrat Black's Latin font files ship with the build; its OFL license is in `public/licenses/`.
 - `src/analysis/`, `src/workers/`: image-statistics analysis, worker lifecycle, optional alignment worker.
 - `src/storage/`: IndexedDB transactions for metadata.
+- `src/ai/`: shared errors/schemas/validation, server OpenRouter provider, bounded request policy, browser proxy client.
+- `server/aiGateway.js`: local-only server environment credential boundary, wired into Vite development and local preview.
 - `src/export/`: checked codec selection and output verification.
 - `src/vendor/mp4-muxer.js`: muxer extracted from the supplied application.
 

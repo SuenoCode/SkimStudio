@@ -27,7 +27,8 @@ import {History} from './core/history.js';
 import {storeProject,loadProject} from './storage/indexedDb.js';
 import {easeInOutCubic,transitionSourceTime,transitionDuration} from './core/transitions.js';
 import {installSimpleEditor} from './ui/simple-editor.js';
-import {DEFAULT_AUDIT_MODEL,listFreeVisionModels,sampleExportFrames,runStoryAudit,runStoryPlanner,auditMarkdown} from './audit/storyAuditor.js';
+import {DEFAULT_AUDIT_MODEL,listFreeVisionModels,sampleExportFrames,extractScriptBeats,runStoryAudit,runStoryPlanner,auditMarkdown} from './audit/storyAuditor.js';
+import {browserAI} from './ai/proxyClient.js';
 
 const $=id=>document.getElementById(id);
 let W=720,H=1280;
@@ -37,7 +38,7 @@ let tlPixelsPerSec=40, isScrubbing=false;
 let exportCancelled=false;
 let refreshReferenceCues=()=>{};
 let presetUI=null;
-let lastExportBlob=null,lastExportAuditSource=null,lastStoryAudit=null,auditBusy=false;
+let lastExportBlob=null,lastExportAuditSource=null,lastStoryAudit=null,auditBusy=false,auditController=null;
 
 const pv=document.createElement('video');pv.playsInline=true;pv.loop=true;pv.muted=true;
 const pc=$('pc'),px=pc.getContext('2d');
@@ -74,18 +75,30 @@ function renderStoryAudit(audit){
 }
 function installStoryAuditor(){
  const open=$('story_audit_open'),dialog=$('story_audit_dialog');if(!open||!dialog)return;
- const run=$('story_audit_run'),key=$('m_audit_key'),model=$('m_audit_model'),count=$('m_audit_count');
- open.onclick=()=>{if(!key.value.trim()&&$('m_story_key')?.value)key.value=$('m_story_key').value;if(model.value===DEFAULT_AUDIT_MODEL&&$('m_story_model')?.value)model.value=$('m_story_model').value;const ready=!!lastExportBlob&&!!lastExportAuditSource;run.disabled=!ready;$('story_audit_export').textContent=ready?`Last export: ${lastExportAuditSource.name||'MP4'} • ${lastExportAuditSource.resolution.width}×${lastExportAuditSource.resolution.height} • ${lastExportAuditSource.duration.toFixed(2)}s`:'Export a video in this browser session before starting an audit.';auditStatus(ready?'Ready to sample the final exported MP4.':'The panel is available now, but Audit final export unlocks after a successful export.');dialog.showModal()};
+ const run=$('story_audit_run'),model=$('m_audit_model'),count=$('m_audit_count');
+ open.onclick=()=>{const ready=!!lastExportBlob&&!!lastExportAuditSource;run.disabled=auditBusy||!ready;$('story_audit_export').textContent=ready?`Last export: ${lastExportAuditSource.name||'MP4'} • ${lastExportAuditSource.resolution.width}×${lastExportAuditSource.resolution.height} • ${lastExportAuditSource.duration.toFixed(2)}s`:'Export a video in this browser session before starting an audit.';auditStatus(ready?'Ready to audit through the configured local AI server.':'Audit final export unlocks after a successful export.');dialog.showModal()};
  $('story_audit_close').onclick=()=>dialog.close();
- $('story_audit_models').onclick=async()=>{if(!key.value.trim()||auditBusy){auditStatus('Enter an OpenRouter API key before loading models.');return}auditBusy=true;auditStatus('Loading free vision-capable models…');try{const models=await listFreeVisionModels(key.value.trim());const list=$('m_audit_models');list.replaceChildren(...models.map(item=>{const option=document.createElement('option');option.value=item.id;option.label=`${item.name}${item.contextLength?' • '+item.contextLength+' ctx':''}`;return option}));auditStatus(`Loaded ${models.length} free vision-capable models. The default route remains available if the list is empty.`)}catch(error){auditStatus(error.message)}finally{auditBusy=false}};
+ dialog.addEventListener('close',()=>auditController?.abort());
+ $('story_audit_cancel').onclick=()=>auditController?.abort();
+ $('story_audit_models').onclick=async()=>{if(auditBusy)return;auditBusy=true;auditStatus('Loading free vision-capable models…');try{const models=await listFreeVisionModels();const list=$('m_audit_models');list.replaceChildren(...models.map(item=>{const option=document.createElement('option');option.value=item.id;option.label=item.name;return option}));auditStatus(`Loaded ${models.length} confirmed free vision-capable models.`)}catch(error){auditStatus(error.message)}finally{auditBusy=false}};
  run.onclick=async()=>{
   if(auditBusy||!lastExportBlob||!lastExportAuditSource)return;
-  const apiKey=key.value.trim(),selectedModel=model.value.trim()||DEFAULT_AUDIT_MODEL;
+  auditController=new AbortController();const signal=auditController.signal;
+  const source=lastExportAuditSource,blob=lastExportBlob;
   auditBusy=true;run.disabled=true;$('story_audit_models').disabled=true;$('story_audit_result').hidden=true;
   try{
-   auditStatus('Sampling the final exported MP4…');const sampled=await sampleExportFrames(lastExportBlob,{...lastExportAuditSource,count:Number(count.value)||12,onProgress:(fraction,frame)=>auditStatus(`Sampling frame ${Math.round(fraction*100)}% — ${frame.timestamp.toFixed(2)}s (${frame.reason})`)});
-   const audit=await runStoryAudit({...lastExportAuditSource,model:selectedModel,frames:sampled.frames,onProgress:(_,message)=>auditStatus(message)});lastStoryAudit=audit;renderStoryAudit(audit);auditStatus(`Audit complete: ${audit.verdict}. Evidence is based on ${sampled.frames.length} frames from the final export.`);
-  }catch(error){auditStatus(`Audit failed: ${error.message}`)}finally{auditBusy=false;run.disabled=!lastExportBlob;$('story_audit_models').disabled=false}
+   const status=await browserAI.status({signal});
+   if(!status.configured)throw new Error('Configure OPENROUTER_API_KEY in .env.local and restart the local server.');
+   if(!source.script.trim())throw new Error('This export has no narration script. Add it and export again.');
+   const selectedModel=model.value.trim()||status.defaultModel||DEFAULT_AUDIT_MODEL;
+   $('story_audit_cancel').hidden=false;
+   auditStatus('Extracting script beats before sampling…');
+   const beatResult=await extractScriptBeats({...source,model:selectedModel,signal});
+   auditStatus('Sampling the final exported MP4…');const sampled=await sampleExportFrames(blob,{...source,beats:beatResult.beats,count:Number(count.value)||12,signal,onProgress:(fraction,frame)=>auditStatus(`Sampling frame ${Math.round(fraction*100)}% — ${frame.timestamp.toFixed(2)}s (${frame.reason})`)});
+   const audit=await runStoryAudit({...source,model:selectedModel,beatResult,frames:sampled.frames,signal,onProgress:(_,message)=>auditStatus(message)});
+   if(source!==lastExportAuditSource||signal.aborted)throw new Error('The export changed or the audit was cancelled. Run the audit again.');
+   lastStoryAudit=audit;renderStoryAudit(audit);auditStatus(`Audit complete: ${audit.verdict}. Model: ${audit.model}. Evidence is based on ${sampled.frames.length} frames from the final export.`);
+  }catch(error){auditStatus(`Audit failed: ${error.message}`)}finally{auditController=null;auditBusy=false;run.disabled=!lastExportBlob;$('story_audit_models').disabled=false;$('story_audit_cancel').hidden=true}
  };
  $('story_audit_download').onclick=()=>{if(!lastStoryAudit)return;const blob=new Blob([auditMarkdown(lastStoryAudit)],{type:'text/markdown'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='skimstudio-story-audit.md';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 }
@@ -358,6 +371,13 @@ $('tm').dispatchEvent(new Event('change'));
 // editing engine that builds the EDL differs. Switching the selector never
 // touches the media bin, narration, captions or any manual edit.
 function isStoryMode(){const v=$('tm').value;return v==='story'||v==='story_multi'}
+
+$('st_ai_mode').onchange=()=>{
+  const ai=$('st_ai_mode').value==='openrouter';
+  $('sy').textContent=ai?'Build AI Story & Sync':'Build Offline Story & Sync';
+  $('st_go').textContent=ai?'Generate AI Story Plan':'Generate Offline Story Plan';
+};
+$('st_ai_mode').dispatchEvent(new Event('change'));
 
 function formatTime(s){
   if(isNaN(s)||s<0)s=0;
@@ -2855,14 +2875,14 @@ function shotPool(pool){
 }
 
 async function sampleStoryPlannerFrames(shots,onProgress=()=>{}){
-  const stride=Math.max(1,Math.ceil(shots.length/16));
-  const selected=shots.filter((_,index)=>index%stride===0).slice(0,16);
+  const stride=Math.max(1,Math.ceil(shots.length/12));
+  const selected=shots.filter((_,index)=>index%stride===0).slice(0,12);
   const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d'),frames=[];
   for(let index=0;index<selected.length;index++){
     const shot=selected[index],video=clips[shot.ci]?.videoEl;
     if(!video)continue;
     await seekFrame(video,(shot.s+shot.e)/2,()=>exportCancelled&&busy);
-    const scale=Math.min(1,384/Math.max(1,video.videoWidth));
+    const scale=Math.min(1,384/Math.max(1,video.videoWidth,video.videoHeight));
     canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
     canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
@@ -2886,8 +2906,9 @@ async function buildStoryEdit(){
   const lines=splitLines($('sc').value);
   if(!lines.length){setStepState('fail','No script found. Write or paste the narration in Step 1, then build again.');setStatus('Write the narration script in Step 1 first.');return}
 
+  const aiController=new AbortController();
   busy=true;pv.pause();
-  showTaskProgress('Building story edit','Analyzing footage and matching shots to the narration…',0);
+  showTaskProgress('Building story edit','Analyzing footage and matching shots to the narration…',0,()=>{exportCancelled=true;aiController.abort()});
   setStepState('work','Analysing the source clips and matching them to the narration…');
   const info=$('st_info');
   const say=t=>{if(info)info.textContent=t;updateTaskProgress(null,t,'Building story edit');};
@@ -2946,20 +2967,20 @@ async function buildStoryEdit(){
       setStepState('fail','The selected clips contain no usable footage (nothing longer than 0.6s was found). Import longer clips and build again.');
       setStatus('No usable footage found in the selected clips.');return}
 
-    // OpenRouter is the editorial brain when a key is supplied. The local
-    // planner below remains the safety layer that clamps source ranges and
-    // validates the returned edit before it reaches the timeline.
-    const aiKey=(($('m_story_key')?.value||$('m_audit_key')?.value)||'').trim();
-    const aiModel=(($('m_story_model')?.value||$('m_audit_model')?.value)||DEFAULT_AUDIT_MODEL).trim()||DEFAULT_AUDIT_MODEL;
+    // Credentials are resolved only by the local server. Offline editing is an
+    // explicit mode; a rejected AI response never turns into a local success.
+    const aiMode=$('st_ai_mode').value==='openrouter';
+    const aiModel=$('m_story_model').value.trim()||undefined;
     let aiPlan=null;
-    if(aiKey){
+    if(aiMode){
+      if(poolShots.length>128)throw new Error('This AI planner supports at most 128 candidate shots per request. Select fewer clips.');
       say('Sampling representative source frames for OpenRouter…');
       const plannerFrames=await sampleStoryPlannerFrames(poolShots,(fraction)=>updateTaskProgress(72+fraction*8,`Preparing source frames ${Math.round(fraction*100)}%…`,'OpenRouter story planning'));
       say('Asking OpenRouter to plan the story outcome…');
-      aiPlan=await runStoryPlanner({apiKey:aiKey,model:aiModel,script:$('sc').value.trim(),duration:total,sections:S.secs.map((sec,index)=>({index,start:sec.start,end:sec.end,role:sec.role,text:sec.lines.map(lineIndex=>lines[lineIndex]).join(' '),keywords:sec.keys})),shots:poolShots.map(sh=>({id:sh.id,clipIdx:sh.ci,sourceStart:+sh.s.toFixed(3),sourceEnd:+sh.e.toFixed(3),duration:+sh.len.toFixed(3),motion:+sh.motion.toFixed(2),action:+sh.action.toFixed(2),steady:+sh.steady.toFixed(2),brightness:+sh.bright.toFixed(2),keywords:[...sh.ev.words].slice(0,16),eventTimes:(sh.events||[]).map(event=>+event.t.toFixed(2))})),shotFrames:plannerFrames,onProgress:(_,message)=>say(message)});
+      aiPlan=await runStoryPlanner({model:aiModel,script:$('sc').value.trim(),duration:total,sections:S.secs.map((sec,index)=>({index,start:sec.start,end:sec.end,role:sec.role,text:sec.lines.map(lineIndex=>lines[lineIndex]).join(' '),keywords:sec.keys})),shots:poolShots.map(sh=>({id:sh.id,clipIdx:sh.ci,sourceStart:sh.s,sourceEnd:sh.e,duration:sh.len,motion:+sh.motion.toFixed(2),action:+sh.action.toFixed(2),steady:+sh.steady.toFixed(2),brightness:+sh.bright.toFixed(2),keywords:[...sh.ev.words].slice(0,16),eventTimes:(sh.events||[]).map(event=>+event.t.toFixed(2))})),shotFrames:plannerFrames,settings:{pace,transitions:trStyle,lightLeaks:wantLeak,filmBurns:wantBurn,variety},signal:aiController.signal,onProgress:(_,message)=>say(message)});
       say(`OpenRouter planned ${aiPlan.shotPlan.length} source shots; validating the edit…`);
     }else{
-      say('OpenRouter key not provided; using the local safety planner. Add a key above to let OpenRouter choose the story outcome.');
+      say('Offline heuristic planner selected. No OpenRouter request will be made.');
     }
     const aiChoicesForSection=sectionIndex=>(aiPlan?.shotPlan||[]).filter(item=>item.sectionIndex===sectionIndex).sort((a,b)=>a.order-b.order);
 
@@ -2981,6 +3002,7 @@ async function buildStoryEdit(){
         // Best evidence first; shots that cannot cover the slot are penalised
         let best=null,bestInfo=null;
         for(const sh of poolShots){
+          if(aiPlan&&sh.id!==aiChoicesForSection(si)[k].shotId)continue;
           if(sh.len<0.5||ctx.used.some(u=>u.ci===sh.ci&&u.si===sh.si&&u.p===sh.p))continue;
           const infoS=scoreShot(sh,sec,ctx);
           let s=infoS.score;
@@ -3090,7 +3112,7 @@ async function buildStoryEdit(){
     // Coverage is validated and reported; never force a mismatch into the final shot.
 
     validateTimeline(edl,clips,c);
-    stagePlan(c,edl);
+    stagePlan(c,edl,aiPlan?{mode:'openrouter',requestMetadata:aiPlan.requestMetadata,beats:aiPlan.beats,payoff:aiPlan.payoff,validationChecklist:aiPlan.validationChecklist}:{mode:'offline'});
   }catch(err){
     const m=(err&&err.message)||String(err);
     setStepState('fail','The story edit could not be built: '+m);
@@ -3460,7 +3482,7 @@ function restoreProject(data) {
   }
   presetUI?.refresh();
   $('sc').value=data.script;cur=clips.findIndex(c=>c.id===data.selectedId);if(cur<0&&clips.length)cur=0;
-  $('tm').dispatchEvent(new Event('change'));activeSegIdx=0;
+  $('tm').dispatchEvent(new Event('change'));$('st_ai_mode').dispatchEvent(new Event('change'));activeSegIdx=0;
   if(cur>=0){$('ed').value=edlToText(clips[cur].edl);showCues();renderTimeline();updateDurBanner(clips[cur]);if(clips[cur].url)pv.src=clips[cur].url;else pv.removeAttribute('src')}
   else{$('ed').value='';$('ct').value='';$('ft').value='';pv.removeAttribute('src');px.clearRect(0,0,pc.width,pc.height)}
   list();syncPlayLabel();
@@ -3504,7 +3526,7 @@ $('capabilities').onclick=async()=>{
  try{await exportConfig(W,H,8e6);report.push('H.264 + AAC export: supported at '+W+' × '+H)}catch(error){report.push(error.message)}await (window.studioAlert?.(report.join('\n'))??Promise.resolve());
 };
 $('analyze_media').onclick=async()=>{if(busy||!clips.length)return;busy=true;exportCancelled=false;showTaskProgress('Analyzing video',`Reading ${clips.length} clip${clips.length===1?'':'s'} for real cuts and motion…`,0,()=>{exportCancelled=true});try{for(let i=0;i<clips.length;i++){const clip=clips[i];await ensureClipLoaded(clip);await analyzeClipScenes(clip,p=>{const pct=(i+p/100)/clips.length*100;updateTaskProgress(pct,`Analyzing ${clip.file.name}: ${p}%`,'Analyzing video');setStatus('Analyzing '+clip.file.name+': '+p+'%')})}updateTaskProgress(100,'Image analysis finished.','Analyzing video');setStatus('Image analysis finished. '+clips.reduce((n,c)=>n+(c._scenes?.length||0),0)+' candidate shots. Scene labels and narrative relevance require your review.')}catch(error){setStatus('Analysis failed: '+error.message)}finally{busy=false;hideTaskProgress()}};
-function stagePlan(c,edl){assertLocksUnchanged(c.edl,edl);pendingPlan={assetId:c.id,edl:cleanData(edl),align:cleanData(c.align||null),storyCues:cleanData(c.storyCues||null)};}
+function stagePlan(c,edl,planning={mode:'offline'}){assertLocksUnchanged(c.edl,edl);pendingPlan={assetId:c.id,edl:cleanData(edl),align:cleanData(c.align||null),storyCues:cleanData(c.storyCues||null),planning:cleanData(planning)};}
 function renderPlan(){
  if(!pendingPlan){setStatus('Generate a story plan first.');return}
  const owner=clips.find(c=>c.id===pendingPlan.assetId);
@@ -3537,25 +3559,31 @@ $('plan_apply').onclick=async()=>{
  if(!owner){pendingPlan=null;$('plan_dialog').close();setStatus('The clip this plan belongs to is no longer available. Generate the plan again.');return}
  try{validateTimeline(pendingPlan.edl,clips,owner);assertLocksUnchanged(owner.edl,pendingPlan.edl);if(owner.edl.length&&!await (window.studioConfirm?.('Replace the current timeline with this reviewed plan? You can undo this change.')??Promise.resolve(false)))return;checkpoint();owner.edl=structuredClone(pendingPlan.edl);owner.align=pendingPlan.align;owner.storyCues=pendingPlan.storyCues;pendingPlan=null;cur=clips.indexOf(owner);$('ed').value=edlToText(owner.edl);rebuildCuesAndFx(owner);$('plan_dialog').close();scheduleSave();seekToTimelineTime(0);setStatus('Applied reviewed plan. Preview and check caption timing before export.')}catch(error){setStatus('Plan needs correction: '+error.message)}
 };
-function reviewedBuilder(builder){return async()=>{
- if(busy)return;const owner=clips[cur];
+let reviewedBuildRunning=false;
+function reviewedBuilder(builder,{requiresAI=false}={}){return async()=>{
+ if(busy||reviewedBuildRunning)return;reviewedBuildRunning=true;const owner=clips[cur];
+ if(requiresAI&&$('st_ai_mode').value==='openrouter'){
+  try{const status=await browserAI.status();if(!status.configured)throw new Error('Configure OPENROUTER_API_KEY in .env.local and restart the local server, or select Offline planner.');if(!$('m_story_model').value.trim())$('m_story_model').value=status.defaultModel||DEFAULT_AUDIT_MODEL;}
+  catch(error){reviewedBuildRunning=false;setStepState('fail',error.message);setStatus(error.message);return;}
+ }
  // Recognized word timing improves accuracy but is never a prerequisite for an editorial
  // plan: the plan is built from the narration audio and the script alone. A failed,
- // unavailable, declined or cancelled sync records a note and the plan is still built,
- // so the review dialog always appears.
+ // unavailable, declined or cancelled sync records a note. A valid plan can still
+ // be built; AI configuration/validation failures remain errors.
  let syncNote='';
- if(owner?.aud&&$('caption_engine')?.value==='speech'&&!hasSpeechTimings(owner)&&!await whisperAlignWords())
+ try{if(owner?.aud&&$('caption_engine')?.value==='speech'&&!hasSpeechTimings(owner)&&!await whisperAlignWords())
   syncNote=($('st').textContent||'Speech recognition did not run.').trim();
+ }catch(error){reviewedBuildRunning=false;setStatus('Speech synchronization failed: '+error.message);return;}
  buildBase=projectSnapshot();pendingPlan=null;exportCancelled=false;const currentAssets=new Map(clips.map(c=>[c.id,c]));
  try{await builder();const staged=pendingPlan;const status=$('st').textContent;restoreProject(buildBase);for(const c of clips){const old=currentAssets.get(c.id);if(old?._analysis){c._analysis=old._analysis;c._scenes=old._scenes}}pendingPlan=staged;
   if(staged){renderPlan();setStepState('idle','Plan ready. Review source choices and apply when ready.');
-   setStatus('Story plan ready for review. Your current timeline is unchanged.'+(syncNote?' Captions use audio-estimated timing: '+syncNote:''));
+   setStatus((staged.planning?.mode==='openrouter'?'OpenRouter story plan ready. Model: '+staged.planning.requestMetadata.actualModel+'.':'Offline heuristic story plan ready.')+' Review before applying.'+(syncNote?' Captions use audio-estimated timing: '+syncNote:''));
   }else setStatus(status)
  }catch(error){const message=(error&&error.message)||String(error);setStepState('fail','The edit could not be built: '+message);setStatus('Auto-Edit & Sync could not finish: '+message)}
- finally{buildBase=null}
+ finally{buildBase=null;reviewedBuildRunning=false}
 }}
 autoSyncAndEdit=reviewedBuilder(autoSyncAndEdit);
-buildStoryEdit=reviewedBuilder(buildStoryEdit);
+buildStoryEdit=reviewedBuilder(buildStoryEdit,{requiresAI:true});
 // Every commentary build goes through the story-aware planner so the main
 // action cannot silently fall back to appearance-only auto-editing. Keep the
 // legacy engine available for the standard/compatibility path and API users.
