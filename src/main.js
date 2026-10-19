@@ -27,6 +27,7 @@ import {History} from './core/history.js';
 import {storeProject,loadProject} from './storage/indexedDb.js';
 import {easeInOutCubic,transitionSourceTime,transitionDuration} from './core/transitions.js';
 import {installSimpleEditor} from './ui/simple-editor.js';
+import {DEFAULT_AUDIT_MODEL,listFreeVisionModels,sampleExportFrames,runStoryAudit,auditMarkdown} from './audit/storyAuditor.js';
 
 const $=id=>document.getElementById(id);
 let W=720,H=1280;
@@ -36,6 +37,7 @@ let tlPixelsPerSec=40, isScrubbing=false;
 let exportCancelled=false;
 let refreshReferenceCues=()=>{};
 let presetUI=null;
+let lastExportBlob=null,lastExportAuditSource=null,lastStoryAudit=null,auditBusy=false;
 
 const pv=document.createElement('video');pv.playsInline=true;pv.loop=true;pv.muted=true;
 const pc=$('pc'),px=pc.getContext('2d');
@@ -45,6 +47,49 @@ if('FaceDetector' in window){
 }else $('fd').textContent='(Face detector not supported, using smart center)';
 
 function setStatus(t){$('st').textContent=t}
+
+function auditSourceSnapshot(c,total,width,height,name){
+ const transcript=c.wordAlignment?.words?.map(word=>word.text||word.word).filter(Boolean).join(' ')||null;
+ return{
+  script:$('sc').value.trim(),transcript,duration:total,resolution:{width,height},name,
+  captions:(c.cues||[]).map(cue=>({s:cue.s,e:cue.e,t:cue.t,w:cue.w||null})),
+  edl:(c.edl||[]).map((shot,index)=>({index,clipIdx:shot.clipIdx,s:shot.s,e:shot.e,sp:shot.sp,timelineStart:shot.timelineStart,timelineEnd:shot.timelineEnd,transition:shot.tr?.type||'cut'}))
+ };
+}
+function auditStatus(message){const el=$('story_audit_status');if(el)el.textContent=message}
+function renderStoryAudit(audit){
+ const result=$('story_audit_result');if(!result)return;
+ result.hidden=false;
+ const verdict=$('story_audit_verdict');verdict.textContent=audit.verdict;verdict.dataset.verdict=audit.verdict;
+ const labels={storyAccuracy:'Story',visualSupport:'Visuals',captionAccuracy:'Captions',pacing:'Pacing',overall:'Overall'};
+ $('story_audit_scores').replaceChildren(...Object.entries(audit.scores||{}).map(([key,value])=>{const box=document.createElement('div');box.className='audit-score';const strong=document.createElement('strong');strong.textContent=Math.round(value);const label=document.createElement('span');label.textContent=labels[key]||key;box.append(strong,label);return box}));
+ $('story_audit_story').textContent=audit.reconstructedStory||'No reconstructed story was returned.';
+ const issues=$('story_audit_issues');issues.replaceChildren();
+ if(audit.issues?.length)for(const issue of audit.issues){const box=document.createElement('div');box.className='audit-issue '+(issue.severity||'medium');const title=document.createElement('strong');title.textContent=`${issue.timestamp==null?'Unknown time':Number(issue.timestamp).toFixed(2)+'s'} — ${String(issue.severity||'medium').toUpperCase()}`;const detail=document.createElement('small');detail.textContent=`Expected: ${issue.expectedMeaning||'—'} Observed: ${issue.observedMeaning||'—'} Evidence: ${(issue.evidence||[]).join('; ')||'—'} Fix: ${issue.recommendedFix||'—'} Acceptance: ${issue.acceptanceCriteria||'—'}`;box.append(title,detail);issues.append(box)}
+ else{const empty=document.createElement('p');empty.textContent='No issues were returned.';issues.append(empty)}
+ $('story_audit_solution').textContent=JSON.stringify(audit.solutionPlan||{},null,2);
+ const limitations=$('story_audit_limitations');limitations.replaceChildren(...(audit.limitations?.length?audit.limitations:['No limitations returned.']).map(item=>{const li=document.createElement('li');li.textContent=item;return li}));
+ $('story_audit_export').textContent=`${audit.exportMeta?.resolution?.width||'?'}×${audit.exportMeta?.resolution?.height||'?'} export • ${(audit.exportMeta?.duration||0).toFixed(2)}s • ${audit.frames?.length||0} sampled frames`;
+ $('story_audit_download').disabled=false;
+}
+function installStoryAuditor(){
+ const open=$('story_audit_open'),dialog=$('story_audit_dialog');if(!open||!dialog)return;
+ const run=$('story_audit_run'),key=$('m_audit_key'),model=$('m_audit_model'),count=$('m_audit_count');
+ open.onclick=()=>{if(lastExportAuditSource){$('story_audit_export').textContent=`Last export: ${lastExportAuditSource.name||'MP4'} • ${lastExportAuditSource.resolution.width}×${lastExportAuditSource.resolution.height} • ${lastExportAuditSource.duration.toFixed(2)}s`;run.disabled=false}dialog.showModal()};
+ $('story_audit_close').onclick=()=>dialog.close();
+ $('story_audit_models').onclick=async()=>{if(!key.value.trim()||auditBusy){auditStatus('Enter an OpenRouter API key before loading models.');return}auditBusy=true;auditStatus('Loading free vision-capable models…');try{const models=await listFreeVisionModels(key.value.trim());const list=$('m_audit_models');list.replaceChildren(...models.map(item=>{const option=document.createElement('option');option.value=item.id;option.label=`${item.name}${item.contextLength?' • '+item.contextLength+' ctx':''}`;return option}));auditStatus(`Loaded ${models.length} free vision-capable models. The default route remains available if the list is empty.`)}catch(error){auditStatus(error.message)}finally{auditBusy=false}};
+ run.onclick=async()=>{
+  if(auditBusy||!lastExportBlob||!lastExportAuditSource)return;
+  const apiKey=key.value.trim(),selectedModel=model.value.trim()||DEFAULT_AUDIT_MODEL;
+  auditBusy=true;run.disabled=true;$('story_audit_models').disabled=true;$('story_audit_result').hidden=true;
+  try{
+   auditStatus('Sampling the final exported MP4…');const sampled=await sampleExportFrames(lastExportBlob,{...lastExportAuditSource,count:Number(count.value)||12,onProgress:(fraction,frame)=>auditStatus(`Sampling frame ${Math.round(fraction*100)}% — ${frame.timestamp.toFixed(2)}s (${frame.reason})`)});
+   const audit=await runStoryAudit({...lastExportAuditSource,model:selectedModel,frames:sampled.frames,onProgress:(_,message)=>auditStatus(message)});lastStoryAudit=audit;renderStoryAudit(audit);auditStatus(`Audit complete: ${audit.verdict}. Evidence is based on ${sampled.frames.length} frames from the final export.`);
+  }catch(error){auditStatus(`Audit failed: ${error.message}`)}finally{auditBusy=false;run.disabled=!lastExportBlob;$('story_audit_models').disabled=false}
+ };
+ $('story_audit_download').onclick=()=>{if(!lastStoryAudit)return;const blob=new Blob([auditMarkdown(lastStoryAudit)],{type:'text/markdown'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='skimstudio-story-audit.md';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+}
+installStoryAuditor();
 
 let taskProgressOverlay=null;
 function ensureTaskProgress(){
@@ -3308,6 +3353,7 @@ let blob;if(fileStream){await fileStream.close();fileStream=null;blob=await file
 const name=c.file.name.replace(/\.[^.]+$/,'')+'_Commentary_9x16.mp4';
 updateExportProgress(99,'Checking MP4 playback…');
 const verification=await verifyExport(blob,total);if(exportCancelled)throw new Error('cancelled');
+lastExportBlob=blob;lastExportAuditSource=auditSourceSnapshot(c,total,W,H,name);$('story_audit_open').disabled=false;
 releaseExportURL();
 const u=URL.createObjectURL(blob);lastExportURL=u;
 hideExportOverlay();c.status='Exported (mp4)';

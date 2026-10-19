@@ -48,6 +48,7 @@
     <button class="g sm" id="capabilities">Browser capabilities</button>
     <button class="g sm" id="analyze_media">Analyze media</button>
     <button class="g sm" id="review_plan">Review plan</button>
+    <button class="g sm" id="story_audit_open" disabled>AI Story Auditor</button>
   </div>
   <div class="pills">
     <label for="export_resolution">Export</label><select id="export_resolution"><option value="360x640">360 × 640</option><option value="720x1280" selected>720 × 1280</option><option value="1080x1920">1080 × 1920</option></select>
@@ -640,6 +641,23 @@
 <div style="margin-top:8px"><a class="b" target="_blank" rel="noopener" href="https://www.youtube.com/upload">YouTube</a><a class="b" target="_blank" rel="noopener" href="https://www.tiktok.com/upload">TikTok</a><a class="b" target="_blank" rel="noopener" href="https://www.instagram.com/">Instagram</a><a class="b" target="_blank" rel="noopener" href="https://www.facebook.com/reels/create">Facebook Reels</a><a class="b" target="_blank" rel="noopener" href="https://x.com/compose/post">X</a></div>
 <p>Download first, then pick the file on the platform's upload page. Platforms only accept uploads from their own sites or approved apps.</p>
 <button class="b" onclick="closeShareDialog()">Close</button></div></div></div>
+<dialog id="story_audit_dialog" class="story-audit-dialog" aria-labelledby="story_audit_title">
+  <div class="story-audit-header"><div><div class="audit-kicker">SKIMSTUDIO / AI REVIEW</div><h2 id="story_audit_title">AI Story Auditor</h2><p>Audits the actual exported MP4 against the script. Your API key stays in this page memory and is never saved in project data.</p></div><button class="g sm" id="story_audit_close">Close</button></div>
+  <div class="story-audit-controls">
+    <label>OpenRouter API key<input id="m_audit_key" type="password" autocomplete="off" placeholder="sk-or-v1-…"></label>
+    <label>Model<input id="m_audit_model" list="m_audit_models" value="openrouter/free" spellcheck="false"><datalist id="m_audit_models"><option value="openrouter/free">Free model router</option></datalist></label>
+    <label>Frame samples<input id="m_audit_count" type="number" min="6" max="32" step="1" value="12"></label>
+    <div class="story-audit-actions"><button class="g sm" id="story_audit_models">Load free models</button><button id="story_audit_run" disabled>Audit final export</button></div>
+  </div>
+  <p id="story_audit_export" class="story-audit-export">Export a video before starting an audit.</p>
+  <div id="story_audit_status" class="story-audit-status" role="status" aria-live="polite">Waiting for an exported video.</div>
+  <section id="story_audit_result" hidden>
+    <div class="story-audit-summary"><div><span class="audit-kicker">VERDICT</span><strong id="story_audit_verdict" class="audit-verdict">—</strong></div><div id="story_audit_scores" class="story-audit-scores"></div></div>
+    <div class="story-audit-grid"><div><h3>Reconstructed story</h3><p id="story_audit_story"></p></div><div><h3>Issues and evidence</h3><div id="story_audit_issues"></div></div></div>
+    <div class="story-audit-grid"><div><h3>Recommended solution plan</h3><pre id="story_audit_solution"></pre></div><div><h3>Limitations</h3><ul id="story_audit_limitations"></ul></div></div>
+    <div class="story-audit-actions"><button class="g sm" id="story_audit_download">Download Markdown report</button></div>
+  </section>
+</dialog>
 <div class="export-overlay" id="export_overlay">
   <div class="export-text" id="export_text">Exporting...</div>
   <div class="progress-bar"><div class="progress-fill" id="export_progress" style="width:0%"></div></div>

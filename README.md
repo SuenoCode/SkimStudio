@@ -38,6 +38,12 @@ The default **Reference Story** look is adapted from the supplied YouTube Short:
 
 Export checks container signature, duration, and decoding at the first, middle, and final frames. It does not automatically prove intelligibility, semantic relevance, exact speech alignment, or audio quality; listen to the finished video.
 
+## AI Story Auditor
+
+After a successful export, open **AI Story Auditor** in the advanced tools. The auditor samples the final MP4 at beat boundaries, cuts, caption changes, motion-sensitive pacing points, and beginning/middle/end coverage. It first extracts six script beats, then sends the timestamped frames and timeline context to OpenRouter for a structured `PASS`, `NEEDS_REVISION`, or `FAIL` report with scores, evidence, issues, limitations, and recommended fixes. The default model is OpenRouter's free router; **Load free models** can discover currently available free vision-capable models.
+
+The API key is held only in page memory. It is intentionally prefixed with an in-memory-only control and is excluded from project autosaves and exported project JSON. The auditor is advisory: it never changes the timeline automatically, and sparse frame sampling or model uncertainty can produce incomplete evidence. OpenRouter's browser request uses its documented chat-completions multimodal image parts and free router/model catalog. See the [OpenRouter chat-completions documentation](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request?explorer=true) and [model catalog documentation](https://openrouter.ai/docs/api/api-reference/models/get-models).
+
 ## Captions and timing
 
 Three additional reusable styles are available in **Edit details → Captions**: **Kinetic Sports Upset**, **Streamer Flashbang Meme**, and **Dialogue Meme Caption**, each with a separate Apply button. They share the preview/export renderer, preserve the existing timeline and measured word times, retain manually edited settings, and support undo. New presets require complete word timings; untimed captions stay hidden until synchronized or imported. Dialogue speaker labels are manual annotations.
