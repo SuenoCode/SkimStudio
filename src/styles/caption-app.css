@@ -35,3 +35,12 @@
 #editor-screen .canvas-topline,#editor-screen .canvas-foot,#editor-screen .preview-actions,#editor-screen #status{width:100%}
 #editor-screen .editor-panel{overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 @media(max-width:700px){#editor-screen{height:calc(100dvh - 80px);min-height:0}#editor-screen .editor-heading{margin:12px 0;gap:8px}#editor-screen .editor-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(230px,42%) minmax(0,1fr);gap:12px;padding-bottom:12px}#editor-screen .canvas{padding:14px}#editor-screen .canvas-topline{margin-bottom:8px}#editor-screen .canvas-foot{margin-top:8px}#editor-screen .preview-actions{margin-top:8px}#editor-screen .editor-panel{padding:20px}}
+
+/* Compact the preview card and keep the primary action outside the scrolling controls. */
+#editor-screen .canvas{width:min(100%,390px);height:fit-content;justify-self:center;align-self:center;padding:16px;grid-template-rows:auto auto auto auto;row-gap:0}
+#editor-screen .video-preview.large{height:min(50dvh,460px);width:auto;max-width:100%;max-height:none;aspect-ratio:9/16}
+#editor-screen .editor-panel{display:grid;grid-template-rows:minmax(0,1fr) auto;overflow:hidden;padding:16px 18px 0}
+#editor-screen .editor-panel-scroll{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:0 10px 12px 0}
+#editor-screen .editor-panel-footer{padding:12px 0 16px;border-top:1px solid #bfd6bd1a;background:linear-gradient(180deg,#111c19,#111c19)}
+#editor-screen .editor-panel-footer .full{margin:0}
+@media(max-width:700px){#editor-screen .canvas{width:100%;height:100%;grid-template-rows:auto minmax(0,1fr) auto auto;align-self:stretch;padding:12px}#editor-screen .video-preview.large{height:100%;width:auto;max-height:100%;max-width:100%}#editor-screen .editor-panel{padding:12px 14px 0}#editor-screen .editor-panel-scroll{padding-right:8px}#editor-screen .editor-panel-footer{padding:8px 0 10px}}
