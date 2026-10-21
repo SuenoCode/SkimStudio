@@ -38,6 +38,7 @@
 
 /* Compact the preview card and keep the primary action outside the scrolling controls. */
 #editor-screen .canvas{width:min(100%,390px);height:fit-content;justify-self:center;align-self:center;padding:16px;grid-template-rows:auto auto auto auto;row-gap:0}
+#editor-screen .editor-layout{grid-template-columns:minmax(0,1fr) minmax(0,3fr)}
 #editor-screen .video-preview.large{height:min(50dvh,460px);width:auto;max-width:100%;max-height:none;aspect-ratio:9/16}
 #editor-screen .editor-panel{display:grid;grid-template-rows:minmax(0,1fr) auto;overflow:hidden;padding:16px 18px 0}
 #editor-screen .editor-panel-scroll{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:0 10px 12px 0}
