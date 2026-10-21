@@ -510,7 +510,7 @@ function captionOptions(config, cue = null) {
     w: canvas.width, h: canvas.height, cf: fontName || values.font, fs: values.size,
     cx_pos: values.x / 100, cy: values.y / 100, caps_lock: config.uppercase !== false,
     chunk_size: values.maxWords, maxLines: values.maxLines, revealMode: values.revealMode, emphasisMode: values.emphasisMode,
-    captionTimingStale: false, wordOffset: 0, speechRuns: cues.map(cue => ({ s: cue.s, e: cue.e })),
+    captionTimingStale: false, wordOffset: 0, speechRuns: cues.map(cue => [cue.s, cue.e]),
     tc: values.baseColor, acc: values.accentColor, accentColor: values.accentColor,
     presetAccent: values.accentColor, sc_col: values.outlineColor, outlineColor: values.outlineColor,
     outlineWidth: values.outlineWidth / 100, sw: values.outlineWidth === 0 ? 'none' : 'normal',

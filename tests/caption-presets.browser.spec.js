@@ -45,6 +45,14 @@ test('presets, overrides, per-cue timing, project restore, and MP4 export use th
   await page.locator('#auto-caption').click();
   await expect(page.locator('#caption-count')).toContainText('caption',{timeout:30000});
   await expect(page.locator('#cue-timing-source')).toContainText('Recognized word timestamps');
+  const visibleYellowPixels=await page.evaluate(()=>{
+    const audio=document.querySelector('#audio-preview'),canvas=document.querySelector('#caption-canvas');
+    audio.currentTime=.15;audio.dispatchEvent(new Event('timeupdate'));
+    const pixels=canvas.getContext('2d').getImageData(80,800,560,230).data;let count=0;
+    for(let i=0;i<pixels.length;i+=4)if(pixels[i]>190&&pixels[i+1]>150&&pixels[i+2]<110)count++;
+    return count;
+  });
+  expect(visibleYellowPixels).toBeGreaterThan(20);
   const readProject=()=>page.evaluate(()=>new Promise((resolve,reject)=>{
     const request=indexedDB.open('skimstudio-caption-projects');request.onerror=()=>reject(request.error);
     request.onsuccess=()=>{const db=request.result,tx=db.transaction('projects','readonly'),get=tx.objectStore('projects').getAll();get.onsuccess=()=>resolve(get.result.find(item=>item.name==='Preset roundtrip'));get.onerror=()=>reject(get.error)};
