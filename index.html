@@ -56,15 +56,39 @@
           <select id="caption-source"><option value="script">Match my script</option><option value="recognized">Use recognized speech</option></select>
 
           <label class="field-label" for="preset-choice">Caption preset</label>
-          <select id="preset-choice"><option value="streamer-flashbang-meme">Viral Shorts</option><option value="kinetic-sports-upset">Action</option><option value="dialogue-meme-caption">Dialogue</option></select>
-          <div class="font-controls"><div><label class="field-label" for="font-choice">Font</label><select id="font-choice"><option value="Impact, Haettenschweiler, sans-serif">Impact</option><option value="Montserrat, Arial, sans-serif">Montserrat</option><option value="Arial Black, Arial, sans-serif">Arial Black</option></select></div><label class="font-import" for="font-file">＋ Import font<input id="font-file" type="file" accept=".ttf,.otf,.woff,.woff2"></label></div>
+          <select id="preset-choice"><option value="reference">Reference Story</option><option value="punch_word">Punch Word</option><option value="speaker_dialogue">Speaker Dialogue</option><option value="neon_story_phrase">Neon Story Phrase</option><option value="condensed_presenter">Condensed Presenter</option><option value="yellow_focus">Yellow Focus</option><option value="soft_neon_story">Soft Neon Story</option><option value="streamer-flashbang-meme">Streamer Flashbang Meme</option><option value="kinetic-sports-upset">Kinetic Sports Upset</option><option value="dialogue-meme-caption">Dialogue Meme Caption</option></select>
+          <div id="preset-preview-cards" class="preset-preview-cards" aria-label="Preset previews"></div>
+          <div class="font-controls"><div><label class="field-label" for="font-choice">Font</label><select id="font-choice"><option value="Montserrat, Arial, sans-serif">Montserrat Black</option><option value="'Bebas Neue','Arial Narrow',Impact,sans-serif">Bebas Neue</option><option value="Impact, Haettenschweiler, sans-serif">Impact</option><option value="Arial, sans-serif">Arial</option><option value="Arial Black, Arial, sans-serif">Arial Black</option></select></div><label class="font-import" for="font-file">＋ Import font<input id="font-file" type="file" accept=".ttf,.otf,.woff,.woff2"></label></div>
 
           <div class="caption-tuning">
             <div class="tuning-heading"><label>Caption placement</label><span>PREVIEW LIVE</span></div>
             <label class="range-setting" for="caption-x"><span>Horizontal</span><output id="caption-x-value">50%</output><input id="caption-x" type="range" min="10" max="90" value="50"></label>
             <label class="range-setting" for="caption-y"><span>Vertical</span><output id="caption-y-value">54%</output><input id="caption-y" type="range" min="10" max="90" value="54"></label>
-            <label class="range-setting" for="caption-size"><span>Font size</span><output id="caption-size-value">30 px</output><input id="caption-size" type="range" min="16" max="60" value="30"></label>
+            <label class="range-setting" for="caption-size"><span>Font size</span><output id="caption-size-value">8.3% · 30 px</output><input id="caption-size" type="range" min="12" max="42" value="30"></label>
           </div>
+          <details class="caption-advanced"><summary>Preset controls <span>+</span></summary>
+            <div class="caption-control-grid">
+              <label>Phrase words<select id="caption-max-words"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
+              <label>Maximum lines<select id="caption-max-lines"><option value="1">1 line</option><option value="2">2 lines</option></select></label>
+              <label>Reveal<select id="caption-reveal"><option value="phrase">Whole phrase</option><option value="progressive">Progressive</option><option value="single">Single word</option></select></label>
+              <label>Emphasis<select id="caption-emphasis-mode"><option value="editorial">Editorial keywords</option><option value="active">Active spoken word</option></select></label>
+              <label>Base color<input id="caption-base-color" type="color" value="#ffffff"></label>
+              <label>Accent color<input id="caption-accent-color" type="color" value="#00e5ff"></label>
+              <label>Speaker label color<input id="caption-speaker-color" type="color" value="#d92d45"></label>
+              <label>Outline color<input id="caption-outline-color" type="color" value="#050505"></label>
+              <label>Outline thickness<output id="caption-outline-value">10%</output><input id="caption-outline-width" type="range" min="0" max="16" value="10"></label>
+              <label>Shadow strength<output id="caption-shadow-value">28%</output><input id="caption-shadow-strength" type="range" min="0" max="60" value="28"></label>
+              <label>Glow strength<output id="caption-glow-value">8%</output><input id="caption-glow-strength" type="range" min="0" max="50" value="8"></label>
+              <label>Entrance duration<output id="caption-entrance-value">0 ms</output><input id="caption-entrance-duration" type="range" min="0" max="300" step="10" value="0"></label>
+              <label>Entrance scale<output id="caption-entrance-scale-value">96%</output><input id="caption-entrance-scale" type="range" min="80" max="100" value="96"></label>
+              <label>Exit fade<output id="caption-exit-value">0 ms</output><input id="caption-exit-duration" type="range" min="0" max="300" step="10" value="0"></label>
+              <label>Safe margin<output id="caption-safe-margin-value">24 px</output><input id="caption-safe-margin" type="range" min="12" max="60" value="24"></label>
+              <label class="control-check"><input id="caption-active-backing" type="checkbox"> Backing on active word</label>
+              <label class="control-check"><input id="caption-active-pulse" type="checkbox"> Subtle active-word pulse</label>
+            </div>
+            <div class="cue-override-controls"><label for="cue-override-select">Caption cue</label><select id="cue-override-select"><option value="">No captions yet</option></select><label for="cue-speaker">Speaker label (optional)</label><input id="cue-speaker" type="text" maxlength="50" placeholder="Only when supplied or confirmed"><label for="cue-emphasis">Editorial emphasis words</label><input id="cue-emphasis" type="text" placeholder="Words in this cue"><label for="cue-emphasis-color">Cue accent</label><input id="cue-emphasis-color" type="color" value="#00e5ff"><label>Per-cue position and size</label><div class="cue-layout-overrides"><label>Horizontal %<input id="cue-position-x" type="number" min="10" max="90" step="1"></label><label>Vertical %<input id="cue-position-y" type="number" min="10" max="90" step="1"></label><label>Size px<input id="cue-font-size" type="number" min="12" max="42" step="1"></label></div><label for="cue-word-times">Word times · absolute seconds</label><textarea id="cue-word-times" rows="3" placeholder="0.00-0.32, 0.36-0.74, 0.80-1.10"></textarea><small id="cue-timing-source">No cue selected. Word times are required for active-word rendering.</small><button id="save-cue-overrides" class="secondary" type="button">Save cue overrides</button><button id="regroup-captions" class="secondary" type="button">Regroup captions · keep word timing</button><button id="reset-preset" class="secondary" type="button">Reset to preset defaults</button><a class="preset-demo-link" href="/caption-presets-demo.html" target="_blank" rel="noreferrer">Open six-style timing demo ↗</a></div>
+            <p id="font-fallback-notice" class="font-fallback-notice" role="status" hidden></p>
+          </details>
           <button id="auto-caption" class="primary full" type="button"><span>✳ &nbsp; Generate auto-captions</span><span>→</span></button>
           <p class="tip"><span>✧</span> Speech recognition runs on this device after the model downloads once.</p>
         </aside>

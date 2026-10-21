@@ -1,9 +1,10 @@
 import {KINETIC_SPORTS_UPSET} from './kineticSportsStyle.js';
 import {STREAMER_FLASHBANG_MEME} from './streamerMemeStyle.js';
 import {DIALOGUE_MEME_CAPTION} from './dialogueMemeStyle.js';
+import {SHORTS_PRESETS,REFERENCE_STORY_PRESET} from './shortsPresetCollection.js';
 import {validatePreset,OWNED_KEYS} from './presetUtils.js';
 export const LEGACY_STYLES=Object.freeze(['reference','shorts','pop','pill','bold','progressive','karaoke']);
-export const PRESETS=Object.freeze([KINETIC_SPORTS_UPSET,STREAMER_FLASHBANG_MEME,DIALOGUE_MEME_CAPTION]);
+export const PRESETS=Object.freeze([KINETIC_SPORTS_UPSET,STREAMER_FLASHBANG_MEME,DIALOGUE_MEME_CAPTION,REFERENCE_STORY_PRESET,...SHORTS_PRESETS]);
 const registry=new Map();
 for(const config of PRESETS){validatePreset(config);if(registry.has(config.id)||LEGACY_STYLES.includes(config.id))throw new Error('Duplicate preset ID');registry.set(config.id,config)}
 export const getPreset=id=>registry.get(id)||null;

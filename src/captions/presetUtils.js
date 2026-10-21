@@ -10,7 +10,7 @@ export function presetColor(choice,colors,fallback){return colors[choice]||(/^#[
 export function definePreset(config){return deepFreeze({...config,serialization:{version:1,id:config.id},defaults:{...BASE_DEFAULTS,...config.defaults}})}
 function deepFreeze(value){for(const item of Object.values(value))if(item&&typeof item==='object')deepFreeze(item);return Object.freeze(value)}
 export function validatePreset(config){
- if(!/^[a-z][a-z0-9-]+$/.test(config.id)||!config.label||!config.description||!config.guidance)throw new Error('Preset identity/description is missing.');
+ if(!/^[a-z][a-z0-9_-]+$/.test(config.id)||!config.label||!config.description||!config.guidance)throw new Error('Preset identity/description is missing.');
  if(config.serialization?.id!==config.id||config.serialization?.version!==1)throw new Error('Invalid preset serialization.');
  if(!Number.isInteger(config.maxWords)||config.maxWords<1||config.maxWords>6||!Number.isInteger(config.minWords)||config.minWords<1||config.minWords>config.maxWords)throw new Error('Invalid caption grouping.');
  if(!config.motion||config.motion.zoom<0||config.motion.zoom>.15||!Array.isArray(config.accentRules))throw new Error('Invalid motion or accent rules.');

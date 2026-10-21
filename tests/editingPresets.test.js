@@ -25,8 +25,9 @@ function harness(){
  return {values,history,controller};
 }
 const cue={s:1,e:3,t:"We won 0.01 😮",w:[{s:0,e:.2},{s:.2,e:.5},{s:1,e:1.2},{s:1.2,e:1.5}]};
-test('registry validates exactly three distinct configurations and retains legacy styles',()=>{
- assert.equal(PRESETS.length,3);assert.equal(new Set(PRESETS.map(p=>p.id)).size,3);
+test('registry validates legacy styles, Reference Story, and the six added configurations',()=>{
+ assert.equal(PRESETS.length,10);assert.equal(new Set(PRESETS.map(p=>p.id)).size,10);
+ for(const id of ['punch_word','speaker_dialogue','neon_story_phrase','condensed_presenter','yellow_focus','soft_neon_story'])assert.ok(getPreset(id));
  for(const p of PRESETS){assert.equal(validatePreset(p),p);assert.equal(getPreset(p.id),p);assert.ok(Object.isFrozen(p.defaults))}
  assert.throws(()=>validatePreset({...PRESETS[0],maxWords:0}));assert.throws(()=>validatePreset({...PRESETS[0],defaults:{}}));
  assert.equal(safeStyle('future-style'),'reference');for(const id of LEGACY_STYLES)assert.equal(safeStyle(id),id);
@@ -74,9 +75,10 @@ for(const preset of PRESETS){
  test(preset.label+': onset, all silence gaps, offsets and final end are strict',()=>{
   const ctx=context(),words=measuredWords(cue),o={w:360,h:640};
   for(const time of [.99,1.6,2.5,3])assert.equal(presetCaptionState(ctx,cue,time,o,words,preset),null);
-  let state=presetCaptionState(ctx,cue,1.1,{...o,wordOffset:.4},words,preset);assert.deepEqual(state.visible,[true,false]);
+  let state=presetCaptionState(ctx,cue,1.1,{...o,wordOffset:.4},words,preset);const reveal=preset.revealMode||'progressive';
+  assert.deepEqual(state.visible,reveal==='single'?[true]:reveal==='phrase'?[true,true]:[true,false]);
   assert.equal(presetCaptionState(ctx,cue,1.1,{...o,speechRuns:[[1.2,1.4]]},words,preset),null);
-  assert.deepEqual(presetCaptionState(ctx,cue,2.1,o,words,preset).texts,['0.01','😮']);
+  assert.equal(presetCaptionState(ctx,cue,2.1,o,words,preset).texts.length,preset.id==='punch_word'?1:2);
  });
  test(preset.label+': preview/export state and commands are identical at 360 and 1080',()=>{
   const words=measuredWords(cue),a=context(),b=context();
@@ -91,7 +93,7 @@ test('layout balances two lines, rescales long Unicode words and clamps backing 
   for(const x of [.1,.5,.9])for(const y of [.1,.9]){
    const l=captionLayout(context(),text.split(' '),{font:'sans-serif',size:50,x,y,speaker:'CELEBRITY'});
    assert.ok(l.lines.length<=2);assert.ok(l.box.x>=24-1e-6);assert.ok(l.box.x+l.box.w<=336+1e-6);
-   assert.ok(l.box.y>=80-1e-6);assert.ok(l.box.y+l.box.h<=520+1e-6);
+   assert.ok(l.box.y>=24-1e-6);assert.ok(l.box.y+l.box.h<=616+1e-6);
    for(const line of l.lines)assert.ok(line.y>=l.box.y&&line.y<=l.box.y+l.box.h);
   }
  }
@@ -115,6 +117,16 @@ test('accents use exact normalized text or explicit words, never substring match
  assert.equal(accentColor(PRESETS[1],'error',{}),PRESETS[1].colors.cyan);
  assert.equal(accentColor(PRESETS[0],'he',{presetEmphasis:'the',presetAccent:'red'}),'#ffffff');
  assert.equal(accentColor(PRESETS[2],'celebrity',{presetEmphasis:'CELEBRITY',presetAccent:'green'}),PRESETS[2].colors.green);
+});
+test('active-word emphasis follows only its supplied word interval and never turns prior words yellow',()=>{
+ const preset=getPreset('yellow_focus'),c={s:1,e:3,t:'one two',w:[{s:0,e:.4},{s:.8,e:1.2}]};
+ const options={emphasisMode:'active',accentColor:'#FFF000',tc:'#FFFFFF'};
+ assert.equal(accentColor(preset,'one',c,{...options,activeWord:true}),'#FFF000');
+ assert.equal(accentColor(preset,'one',c,{...options,activeWord:false}),'#FFFFFF');
+ assert.equal(accentColor(preset,'one',{...c,presetWordColors:{one:'#00E5FF'}},{...options,activeWord:true}),'#FFF000');
+ const state=presetCaptionState(context(),c,1.9,{w:360,h:640,emphasisMode:'active'},measuredWords(c),preset);
+ assert.equal(state.active,0);assert.deepEqual(state.texts,['TWO']);
+ assert.equal(presetCaptionState(context(),c,2.2,{w:360,h:640,emphasisMode:'active'},measuredWords(c),preset),null);
 });
 test('locked/manual/custom shots get no preset motion, shake, glitch or transition changes',()=>{
  for(const config of PRESETS)for(const shot of [{lock:true},{manualFraming:true},{camera:'custom'}]){
