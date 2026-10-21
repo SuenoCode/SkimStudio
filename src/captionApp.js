@@ -174,6 +174,27 @@ function updateCounts() {
   const mediaReady = video.readyState >= 2 && audio.readyState >= 2;
   $('play-preview').disabled = !(videoFile && audioFile && mediaReady);
   $('export-video').disabled = !(videoFile && audioFile && mediaReady && cues.length);
+  updatePreviewNavigation();
+}
+const formatPreviewTime = value => `${Math.floor(Math.max(0, value) / 60)}:${String(Math.floor(Math.max(0, value) % 60)).padStart(2, '0')}`;
+function updatePreviewNavigation() {
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  const ready = !!videoFile && duration > 0;
+  $('preview-seek').max = String(duration);
+  $('preview-seek').value = String(Math.min(current, duration));
+  $('preview-time').textContent = `${formatPreviewTime(current)} / ${formatPreviewTime(duration)}`;
+  $('preview-seek').disabled = !ready;
+  $('seek-back').disabled = !ready;
+  $('seek-forward').disabled = !ready;
+  $('enlarge-preview').disabled = !videoFile;
+}
+function seekPreview(time) {
+  if (!videoFile || !Number.isFinite(video.duration)) return;
+  const next = Math.max(0, Math.min(video.duration, time));
+  video.currentTime = next;
+  if (audioFile && Number.isFinite(audio.duration) && audio.duration > 0) audio.currentTime = Math.min(next, audio.duration);
+  drawPreview(); updatePreviewNavigation();
 }
 function clearObjectUrl(value) { if (value) { URL.revokeObjectURL(value); objectUrls.delete(value); } }
 
@@ -543,15 +564,34 @@ function drawPreview(requestedTime = null) {
 $('play-preview').addEventListener('click', async () => {
   if (!videoFile || !audioFile) return;
   if (!video.paused) { video.pause(); audio.pause(); $('play-preview').textContent = 'Play preview'; return; }
-  video.currentTime = 0; audio.currentTime = 0;
+  if (video.ended || video.currentTime >= video.duration) video.currentTime = 0;
+  if (audio.ended || audio.currentTime >= audio.duration) audio.currentTime = 0;
   try { await Promise.all([video.play(), audio.play()]); $('play-preview').textContent = 'Pause preview'; }
   catch (error) { setStatus(`Could not play preview: ${error.message}`, true); }
 });
 audio.addEventListener('ended', () => { video.pause(); $('play-preview').textContent = 'Play preview'; });
 video.addEventListener('loadedmetadata', () => { $('play-preview').disabled = false; updateCounts(); });
 video.addEventListener('loadeddata', () => { updateCounts(); scheduleSave(); });
+video.addEventListener('durationchange', updatePreviewNavigation);
+video.addEventListener('timeupdate', updatePreviewNavigation);
 audio.addEventListener('loadedmetadata', updateCounts);
 audio.addEventListener('loadeddata', updateCounts);
+$('preview-seek').addEventListener('input', event => seekPreview(Number(event.currentTarget.value)));
+$('seek-back').addEventListener('click', () => seekPreview(video.currentTime - 5));
+$('seek-forward').addEventListener('click', () => seekPreview(video.currentTime + 5));
+const previewScreen = $('preview-screen');
+$('enlarge-preview').addEventListener('click', async () => {
+  previewScreen.classList.add('enlarged');
+  try { if (previewScreen.requestFullscreen) await previewScreen.requestFullscreen(); }
+  catch { /* Use the fixed-position fallback when fullscreen permission is unavailable. */ }
+});
+$('close-enlarge-preview').addEventListener('click', async () => {
+  if (document.fullscreenElement === previewScreen) await document.exitFullscreen?.();
+  previewScreen.classList.remove('enlarged');
+});
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) previewScreen.classList.remove('enlarged');
+});
 
 async function exportVideo() {
   if (!cues.length || !videoFile || !audioFile) return;
