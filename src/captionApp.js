@@ -265,7 +265,16 @@ function updateCaptionControls() {
   clearPresetLayouts(); drawPreview(); scheduleSave();
 }
 for (const [id, key] of [['caption-x', 'x'], ['caption-y', 'y'], ['caption-size', 'size']]) {
-  $(id).addEventListener('input', event => { presetOverrides[key] = Number(event.target.value); updateCaptionControls(); });
+  $(id).addEventListener('input', event => {
+    presetOverrides[key] = Number(event.target.value);
+    let cleared = 0;
+    for (const cue of cues) if (cue.presetOverride && Object.hasOwn(cue.presetOverride, key)) {
+      delete cue.presetOverride[key]; cleared++;
+      if (!Object.keys(cue.presetOverride).length) delete cue.presetOverride;
+    }
+    updateCaptionControls();
+    if (cleared) setStatus(`Applied this ${key === 'x' ? 'horizontal position' : key === 'y' ? 'vertical position' : 'size'} to all captions; cleared ${cleared} cue-specific override${cleared === 1 ? '' : 's'}.`);
+  });
 }
 const controlOverrides = {
   'caption-max-words':'maxWords','caption-max-lines':'maxLines','caption-reveal':'revealMode','caption-emphasis-mode':'emphasisMode',

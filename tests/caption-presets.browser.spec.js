@@ -38,6 +38,10 @@ test('presets, overrides, per-cue timing, project restore, and MP4 export use th
   const six=['punch_word','speaker_dialogue','neon_story_phrase','condensed_presenter','yellow_focus','soft_neon_story'];
   for(const id of six){await page.locator('#preset-choice').selectOption(id);await expect(page.locator('#preset-choice')).toHaveValue(id)}
   await page.locator('#preset-choice').selectOption('yellow_focus');
+  await expect(page.locator('#caption-size')).toHaveValue('25');await expect(page.locator('#caption-y')).toHaveValue('69');
+  for(const [id,value] of [['caption-size','32'],['caption-x','34'],['caption-y','71']])
+    await page.locator(`#${id}`).evaluate((el,next)=>{el.value=next;el.dispatchEvent(new Event('input',{bubbles:true}));},value);
+  await expect(page.locator('#caption-size-value')).toContainText('32 px');
   await page.locator('#auto-caption').click();
   await expect(page.locator('#caption-count')).toContainText('caption',{timeout:30000});
   await expect(page.locator('#cue-timing-source')).toContainText('Recognized word timestamps');
@@ -50,6 +54,11 @@ test('presets, overrides, per-cue timing, project restore, and MP4 export use th
   await page.locator('#cue-word-times').fill('0.04-0.31, 0.40-0.74');
   await page.locator('#save-cue-overrides').click();
   await expect(page.locator('#cue-timing-source')).toContainText('Manually corrected word timestamps');
+  await page.locator('#cue-position-x').fill('60');await page.locator('#cue-position-y').fill('64');await page.locator('#cue-font-size').fill('27');
+  await page.locator('#save-cue-overrides').click();
+  for(const [id,value] of [['caption-size','31'],['caption-x','38'],['caption-y','75']])
+    await page.locator(`#${id}`).evaluate((el,next)=>{el.value=next;el.dispatchEvent(new Event('input',{bubbles:true}));},value);
+  await expect(page.locator('#status')).toContainText('cleared 1 cue-specific override');
   await page.waitForTimeout(700);
   const before=await readProject(),timing=before.cues.flatMap(cue=>cue.w.map(word=>[+(cue.s+word.s).toFixed(4),+(cue.s+word.e).toFixed(4)]));
   await page.locator('#caption-max-words').selectOption('1');
@@ -62,11 +71,14 @@ test('presets, overrides, per-cue timing, project restore, and MP4 export use th
   await page.waitForTimeout(800);
   const saved=await readProject();
   expect(saved.preset).toBe('yellow_focus');expect(saved.presetVersion).toBe(1);expect(saved.presetOverrides.maxWords).toBe(1);
+  expect(saved.presetOverrides).toMatchObject({size:31,x:38,y:75});
   const after=saved.cues.flatMap(cue=>cue.w.map(word=>[+(cue.s+word.s).toFixed(4),+(cue.s+word.e).toFixed(4)]));
   expect(after).toEqual(timing);expect(saved.cues[0].presetSpeaker).toBe('NARRATOR');expect(saved.cues[0].src).toBe('manual');
+  expect(saved.cues[0].presetOverride||{}).toEqual({});
   await page.reload();await page.locator('[data-open-project]').filter({hasText:'Preset roundtrip'}).click();
   await expect(page.locator('#preset-choice')).toHaveValue('yellow_focus');
   await expect(page.locator('#caption-max-words')).toHaveValue('1');
+  await expect(page.locator('#caption-size')).toHaveValue('31');await expect(page.locator('#caption-x')).toHaveValue('38');await expect(page.locator('#caption-y')).toHaveValue('75');
   await expect(page.locator('#cue-speaker')).toHaveValue('NARRATOR');
   const mp4Download=page.waitForEvent('download',{timeout:90000}).catch(()=>null);
   await page.locator('#export-video').click();

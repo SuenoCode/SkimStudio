@@ -127,6 +127,10 @@ test('active-word emphasis follows only its supplied word interval and never tur
  const state=presetCaptionState(context(),c,1.9,{w:360,h:640,emphasisMode:'active'},measuredWords(c),preset);
  assert.equal(state.active,0);assert.deepEqual(state.texts,['TWO']);
  assert.equal(presetCaptionState(context(),c,2.2,{w:360,h:640,emphasisMode:'active'},measuredWords(c),preset),null);
+ const continuous={s:1,e:3,t:'one two',w:[{s:0,e:.4},{s:.4,e:.8}],presetWordColors:{one:'#00E5FF',two:'#00E5FF'}};
+ const first=presetCaptionState(context(),continuous,1.2,{w:360,h:640,emphasisMode:'active',accentColor:'#FFF000',tc:'#FFFFFF'},measuredWords(continuous),preset);
+ const second=presetCaptionState(context(),continuous,1.6,{w:360,h:640,emphasisMode:'active',accentColor:'#FFF000',tc:'#FFFFFF'},measuredWords(continuous),preset);
+ assert.deepEqual(first.colors,['#FFF000','#FFFFFF']);assert.deepEqual(second.colors,['#FFFFFF','#FFF000']);
 });
 test('locked/manual/custom shots get no preset motion, shake, glitch or transition changes',()=>{
  for(const config of PRESETS)for(const shot of [{lock:true},{manualFraming:true},{camera:'custom'}]){

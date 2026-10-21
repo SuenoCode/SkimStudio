@@ -65,12 +65,15 @@ export function presetCaptionState(ctx,cue,time,options,words,config){
  const speaker=config.labels?String(cue.presetSpeaker||'').trim().toUpperCase().replace(/:$/,''):'';
  const font=options.cf||config.defaults.cf;
  const params={font,weight:config.weight||900,size:options.fs||Number(config.defaults.csz),x:options.cx_pos??.5,y:options.cy??Number(config.defaults.cy)/100,speaker:speaker?speaker+':':'',maxLines:options.maxLines||config.maxLines||2,safeMargin:options.safeMargin??24,padding:options.captionPadding??config.padding??12,outlineRatio:options.outlineWidth??config.outlineRatio??config.stroke??.06,shadowStrength:options.shadowStrength??config.shadowStrength??.16};
- const key=JSON.stringify([config.id,texts,params,cue.presetEmphasis,cue.presetWordColors,cue.presetAccent,cue.refEmphasis,cue.refAccent,options.presetAccent,options.acc,options.tc]);
+ const key=JSON.stringify([config.id,texts,params]);
  let cached=layouts.get(key);
  if(!cached){
-  cached={layout:captionLayout(ctx,texts,params),colors:texts.map((t,i)=>config.labels&&/:$/.test(t)?(options.speakerColor||config.speakerColor||config.colors.magenta):accentColor(config,t,cue,{...options,activeWord:i===active-start}))};
+  cached={layout:captionLayout(ctx,texts,params)};
   if(layouts.size>=LIMIT)layouts.delete(layouts.keys().next().value);layouts.set(key,cached);
  }
+ // Emphasis depends on the active timestamp. Keep only geometry in the layout cache
+ // so seeking or playback never freezes the first word's color across a whole cue.
+ const colors=texts.map((t,i)=>config.labels&&/:$/.test(t)?(options.speakerColor||config.speakerColor||config.colors.magenta):accentColor(config,t,cue,{...options,activeWord:i===active-start}));
  const intro=clamp(Number(options.captionIntroMs??config.entranceMs??(config.intro||0)*1000)/1000,0,.3),age=relative-group[0].s;
  // Keep short words visible on their first sampled frame; never extend their end.
  let alpha=intro?clamp(age/intro,0,1):1;
@@ -81,7 +84,7 @@ export function presetCaptionState(ctx,cue,time,options,words,config){
  const mode=options.revealMode||config.revealMode||'progressive';
  const visible=group.map((w,i)=>mode==='single'?i===active-start:mode==='progressive'?relative>=w.s:true);
  const backing=options.presetBacking??config.defaults.preset_backing;
- return {...cached,texts,visible,active:active-start,alpha,scale,
+ return {...cached,colors,texts,visible,active:active-start,alpha,scale,
   backing,activeWordBacking:options.activeWordBacking??config.activeWordBacking,
   activePulse:!!options.activePulse,
   glow:options.presetGlow??config.defaults.preset_glow,
